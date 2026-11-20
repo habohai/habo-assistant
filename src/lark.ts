@@ -37,16 +37,36 @@ export interface LarkOptions {
   logger?: Pick<Logger, 'info' | 'debug' | 'warn'>
 }
 
-/** Parse a CLI JSON envelope even when the CLI prints progress lines first. */
+/** Parse the first complete JSON object, ignoring CLI progress/log lines around it. */
 function parseCliJson<T>(stdout: string): T {
   const text = stdout.trim()
   try {
     return JSON.parse(text) as T
   } catch {
     const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1)) as T
-    throw new Error(`lark-cli did not return JSON: ${text.slice(0, 120)}`)
+    if (start === -1) throw new Error(`lark-cli did not return JSON: ${text.slice(0, 120)}`)
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === '{') depth += 1
+      else if (char === '}') {
+        depth -= 1
+        if (depth === 0) return JSON.parse(text.slice(start, index + 1)) as T
+      }
+    }
+    throw new Error(`lark-cli returned incomplete JSON: ${text.slice(0, 120)}`)
   }
 }
 
