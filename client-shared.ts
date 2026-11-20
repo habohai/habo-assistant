@@ -141,10 +141,12 @@ export function useFeishuStatus(
 
 /** Poll status for the task page's connection light and current binding set. */
 let lastBoundSessions: Set<string> | undefined
+let lastConnectionAt: number | undefined
 
 export function useFeishuConnection(React: typeof ReactNS): {
   connection: ConnectionState
   boundSessions?: Set<string>
+  updatedAt?: number
 } {
   const { data } = useFeishuStatus(React, { pollMs: 3000 })
   const connection: ConnectionState = data === undefined
@@ -154,10 +156,14 @@ export function useFeishuConnection(React: typeof ReactNS): {
       : data.consumer === true ? 'connecting' : 'offline'
   // Keep the last known binding set while a remounted task page waits for its
   // first status response; otherwise every click briefly shows unbound tasks.
-  if (data !== undefined) lastBoundSessions = new Set(data.bindings.map(binding => binding.sessionId))
+  if (data !== undefined) {
+    lastBoundSessions = new Set(data.bindings.map(binding => binding.sessionId))
+    lastConnectionAt = Date.now()
+  }
   return {
     connection,
     ...(lastBoundSessions === undefined ? {} : { boundSessions: lastBoundSessions }),
+    ...(lastConnectionAt === undefined ? {} : { updatedAt: lastConnectionAt }),
   }
 }
 

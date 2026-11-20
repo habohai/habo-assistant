@@ -79,6 +79,7 @@ const zh: Record<string, string> = {
   statusApproval: '待审批',
   statusIdle: '已完成',
   connReady: '已连接',
+  statusUpdated: '状态更新于 {time}',
   connConnecting: '连接中',
   connOffline: '未连接',
   chat: '群 {id}',
@@ -101,6 +102,7 @@ const en: Record<string, string> = {
   statusApproval: 'Approval',
   statusIdle: 'Done',
   connReady: 'Connected',
+  statusUpdated: 'Updated at {time}',
   connConnecting: 'Connecting',
   connOffline: 'Offline',
   chat: 'Chat {id}',
@@ -170,6 +172,11 @@ function formatDuration(startedAt: number, now: number): string {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+function formatClockSeconds(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return '--:--:--'
+  return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 function formatClock(time: number): string {
   if (!Number.isFinite(time) || time <= 0) return ''
   return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -182,7 +189,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     t: TFunction
   }): ReactNS.ReactElement {
     const { t } = props
-    const { connection, boundSessions } = useFeishuConnection(React)
+    const { connection, boundSessions, updatedAt } = useFeishuConnection(React)
     const useSessions = props.useSessions as <T>(selector: (state: SessionsState) => T) => T
     const state = useSessions(snapshot => snapshot)
     React.useEffect(() => {
@@ -235,11 +242,12 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     return <div className="ft-page" data-feishu-tasks="">
       <style>{`
         .ft-page { display: flex; flex-direction: column; height: 100%; min-height: 0; color: inherit; }
-        .ft-summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 10px 12px 7px; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
+        .ft-statusbar { display: flex; align-items: center; gap: 6px; padding: 9px 12px 0; }
+        .ft-summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 5px 12px 7px; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
         .ft-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 2px; padding: 1px 7px 1px 6px; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .18)); border-radius: 999px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
+        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
         .ft-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
-        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); animation: ft-breathe 7.2s ease-in-out infinite; will-change: opacity, transform; }
+        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-breathe 7.2s ease-in-out infinite; will-change: opacity, transform; }
         .ft-conn.connecting .ft-live-dot { background: var(--dsw-alias-state-warning-primary, #D97706); animation: ft-live 1.6s ease-in-out infinite; }
         .ft-conn.offline .ft-live-dot { background: var(--dsw-alias-state-error-primary, #E5484D); }
         @keyframes ft-live { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
@@ -265,15 +273,17 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-empty-title { color: inherit; font-size: 13px; font-weight: 500; }
         .ft-empty-hint { font-size: 11px; opacity: .8; }
       `}</style>
+      <div className="ft-statusbar">
+        <span className={`ft-conn ${connection}`} role="status" title={t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}>
+          <span>{connection === 'ready' ? t('statusUpdated', { time: formatClockSeconds(updatedAt ?? 0) }) : t(connection === 'connecting' ? 'connConnecting' : 'connOffline')}</span>
+          <span className="ft-live-dot" aria-hidden="true" />
+        </span>
+      </div>
       <div className="ft-summary">
         <span className="ft-summary-text">
           {running + approval > 0
             ? t('summaryActive', { running: String(running), approval: String(approval) })
             : t('summaryIdle')}
-        </span>
-        <span className={`ft-conn ${connection}`} role="status" title={t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}>
-          <span className="ft-live-dot" aria-hidden="true" />
-          {t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}
         </span>
       </div>
       {visible.length === 0
