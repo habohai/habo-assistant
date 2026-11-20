@@ -1,24 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="8" y1="4" x2="56" y2="62" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3D7BFF"/>
-      <stop offset="0.55" stop-color="#2F63F4"/>
-      <stop offset="1" stop-color="#00B8D9"/>
-    </linearGradient>
-    <linearGradient id="check" x1="27" y1="29" x2="43" y2="42" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2F63F4"/>
-      <stop offset="1" stop-color="#00A6C4"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(18 12) rotate(48) scale(46 44)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect x="4" y="4" width="56" height="56" rx="17" fill="url(#bg)"/>
-  <rect x="4.5" y="4.5" width="55" height="55" rx="16.5" stroke="#FFFFFF" stroke-opacity="0.18"/>
-  <rect x="4" y="4" width="56" height="56" rx="17" fill="url(#glow)"/>
-  <path d="M17 24.5C17 19.8 20.8 16 25.5 16H43.5C48.2 16 52 19.8 52 24.5V36.5C52 41.2 48.2 45 43.5 45H34L25 52V45H25.5C20.8 45 17 41.2 17 36.5V24.5Z" fill="#FFFFFF"/>
-  <path d="M26.5 30.5L31.5 35.5L41.5 25.5" stroke="url(#check)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M52 9.5C52 11.8 50.8 13 48.5 13C50.8 13 52 14.2 52 16.5C52 14.2 53.2 13 55.5 13C53.2 13 52 11.8 52 9.5Z" fill="#FFFFFF" fill-opacity="0.88"/>
-  <circle cx="52.5" cy="52.5" r="4.6" fill="#2EE6A6" stroke="#FFFFFF" stroke-width="1.6"/>
+  <g stroke="#3370FF" stroke-width="5" stroke-linecap="round">
+  <line x1="38.44" y1="32.90" x2="58.74" y2="35.76"/>
+  <line x1="37.19" y1="35.91" x2="42.38" y2="39.82"/>
+  <line x1="34.64" y1="37.94" x2="41.76" y2="53.93"/>
+  <line x1="30.98" y1="38.42" x2="30.12" y2="43.85"/>
+  <line x1="28.00" y1="37.12" x2="14.76" y2="54.06"/>
+  <line x1="26.06" y1="34.64" x2="19.21" y2="37.69"/>
+  <line x1="25.55" y1="31.21" x2="6.19" y2="28.83"/>
+  <line x1="26.68" y1="28.27" x2="21.35" y2="24.54"/>
+  <line x1="29.15" y1="26.16" x2="21.04" y2="9.53"/>
+  <line x1="32.23" y1="25.50" x2="32.52" y2="17.01"/>
+  <line x1="35.35" y1="26.43" x2="43.85" y2="12.29"/>
+  <line x1="37.69" y1="28.85" x2="42.50" y2="26.18"/>
+  </g>
 </svg>
