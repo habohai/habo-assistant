@@ -79,6 +79,7 @@ export interface BotServices {
   seen?: SeenStore
   chats?: ChatDirectory
   botNames?: ReadonlyMap<string, string>
+  isPrimary?: boolean
 }
 
 interface PendingTurn {
@@ -142,6 +143,7 @@ export class FeishuBot {
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
+  private readonly isPrimary: boolean
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
 
@@ -189,6 +191,7 @@ export class FeishuBot {
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
+    this.isPrimary = services.isPrimary ?? true
     this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
 
@@ -580,9 +583,38 @@ export class FeishuBot {
       if (typeof value.command === 'string') command = value.command
     }
     if (command === '' || !command.includes('lark-cli') || !command.includes('+messages-send')) return
+    const profile = /(?:^|\s)--profile(?:\s+|=)([^\s]+)/.exec(command)?.[1]
+    if (profile !== undefined) {
+      if (profile !== this.config.larkProfile) return
+    } else if (!this.isPrimary) {
+      // Only the default/primary bot may claim when the command omits --profile.
+      return
+    }
+    if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return
     const match = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)
     if (match === null) return
-    void this.recordChatAffinity(match[1] as string, sessionId, typeof event.time === 'number' ? event.time : Date.now())
+    void this.claimOutbound(match[1] as string, sessionId, typeof event.time === 'number' ? event.time : Date.now())
+  }
+
+  /**
+   * A bot message sent from a Session claims the conversation: the conversation
+   * binds to that Session, and the sending bot is lazily granted.
+   */
+  private async claimOutbound(chatId: string, sessionId: string, at: number): Promise<void> {
+    try {
+      const info = await this.cli.chatInfo(chatId)
+      if (info?.botMember !== true) return
+      const key = bindingKey(chatId, '', this.routing)
+      const current = this.registry.get(key)
+      if (current?.sessionId !== sessionId || !this.registry.hasGrant(key)) {
+        await this.setBinding(key, sessionId, 'outbound')
+        this.ctx.logger.info(`feishu-bot: outbound claim ${chatId} -> ${sessionId} via ${this.config.botName}`)
+      }
+      await this.recordChatAffinity(chatId, sessionId, at)
+      this.trackSession(sessionId, chatId)
+    } catch (error) {
+      this.ctx.logger.warn(`feishu-bot: outbound claim failed for ${chatId}: ${String(error)}`)
+    }
   }
 
   private recordChatAffinity(chatId: string, sessionId: string, at: number): Promise<void> {
@@ -610,7 +642,7 @@ export class FeishuBot {
   }
 
   /** Session-facing binding list with resolved group names. */
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
     const summaries = await Promise.all(this.registry.entries().map(async ([key, record]) => {
@@ -623,6 +655,7 @@ export class FeishuBot {
         chatId,
         chatType: (this.chats.kind(chatId) === 'p2p' || p2p ? 'p2p' : 'group') as 'p2p' | 'group',
         botId: record.botId,
+        botIds: this.registry.botIdsFor(key),
         sessionId: record.sessionId,
         source: record.source,
         boundAt: record.at,
@@ -635,7 +668,7 @@ export class FeishuBot {
 
   /** Every chat the bot can see, annotated with allowlist/binding state. */
   async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>> {
-    const bound = new Set(this.registry.entries().map(([key]) => key.split('::')[0]))
+    const bound = new Set(this.registry.entries().filter(([key]) => this.registry.hasGrant(key)).map(([key]) => key.split('::')[0]))
     const chats = await this.cli.listChats(force)
     return chats.map(chat => ({
       ...chat,
@@ -925,7 +958,7 @@ export class FeishuBot {
   }
 
   /** Write the authoritative binding and its display history together. */
-  private async setBinding(key: string, sessionId: string, source: 'auto' | 'manual' | 'external'): Promise<void> {
+  private async setBinding(key: string, sessionId: string, source: 'auto' | 'manual' | 'external' | 'outbound'): Promise<void> {
     const index = key.indexOf('::')
     const chatId = index === -1 ? key : key.slice(0, index)
     const threadId = index === -1 ? '' : key.slice(index + 2)
@@ -1127,20 +1160,7 @@ export class FeishuBot {
       && (resolution.kind === 'explicit' || resolution.kind === 'auto')) {
       void this.refreshPrivateTitle(known, event.chatId)
     }
-    if (event.chatType === 'group') {
-      const candidate = this.registry.candidateFor(event.chatId)
-      const recent = candidate?.sessionId !== undefined && candidate.at > 0
-        && Date.now() - candidate.at <= this.config.outboundReplyTtlMs
-      const activeSession = resolution.kind === 'explicit' || resolution.kind === 'auto' ? known : undefined
-      if (recent && candidate.sessionId !== undefined && candidate.sessionId !== activeSession) {
-        // A group member is replying shortly after this session sent there;
-        // the sender session takes over, replacing an older group binding.
-        await this.setBinding(key, candidate.sessionId, 'auto')
-        await this.recordChatAffinity(event.chatId, candidate.sessionId, Date.now())
-        this.trackSession(candidate.sessionId, event.chatId)
-        return candidate.sessionId
-      }
-    }
+
     if (known !== undefined && resolution.kind === 'explicit') {
       // Explicit/manual binding is authoritative: never discover, digest, or create.
       if (workspace !== undefined && !workspace.sessionIds.includes(known)) {
@@ -1151,6 +1171,7 @@ export class FeishuBot {
         }
       }
       this.trackSession(known, event.chatId)
+      await this.registry.grant(key)
       return known
     }
     if (resolution.kind === 'unbound') {
@@ -1179,6 +1200,7 @@ export class FeishuBot {
       }
     }
     if (known !== undefined) {
+      await this.registry.grant(key)
       if (workspace !== undefined && !workspace.sessionIds.includes(known)) {
         try {
           await workspace.attachSession(known)
@@ -1323,7 +1345,7 @@ export class BotHost {
       ready: statuses.every(entry => entry.status.ready === true),
       consumer: statuses.every(entry => entry.status.consumer === true),
       stopping: statuses.some(entry => entry.status.stopping === true),
-      bindings: this.bots.reduce((sum, bot) => sum + bot.registry.entries().length, 0),
+      bindings: this.primary.registry.entries().length,
       bots: statuses.map(({ bot, status }) => ({
         id: bot.config.botId,
         name: bot.config.botName,
@@ -1334,7 +1356,7 @@ export class BotHost {
     }
   }
 
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     const summaries = await Promise.all(this.bots.map(bot => bot.bindingSummaries(force)))
     return summaries.flat()
   }
@@ -1368,7 +1390,7 @@ export class BotHost {
         name: bot.config.botName,
         ...(bot.config.botOpenId === undefined ? {} : { openId: bot.config.botOpenId }),
         member: this.bots.length === 1 ? chat.botMember : memberships.get(chat.chatId)?.get(bot.config.botId) === true,
-        bound: bot.registry.entries().some(([key]) => key === chat.chatId || key.startsWith(`${chat.chatId}::`)),
+        bound: bot.registry.entries().some(([key]) => (key === chat.chatId || key.startsWith(`${chat.chatId}::`)) && bot.registry.hasGrant(key)),
       }))
       return { ...chat, botMember: bots.some(bot => bot.member), bound: bots.some(bot => bot.bound), bots }
     })
@@ -1402,7 +1424,7 @@ export class BotHost {
     }
     const bots = chatType === 'p2p'
       ? this.bots.flatMap(bot => {
-        const bound = bot.registry.entries().some(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+        const bound = bot.registry.entries().some(([key]) => (key === chatId || key.startsWith(`${chatId}::`)) && bot.registry.hasGrant(key))
         return bound
           ? [{
             id: bot.config.botId,
@@ -1424,17 +1446,22 @@ export class BotHost {
     }
   }
 
-  bindingsForChat(chatId: string): Array<{ chatId: string; botId: string; botName: string; sessionId: string; source: string; at: number }> {
-    return this.bots.flatMap(bot => bot.registry.entries()
+  bindingsForChat(chatId: string): Array<{ chatId: string; botId: string; botName: string; botIds: string[]; botNames: string[]; sessionId: string; source: string; at: number }> {
+    return this.primary.registry.entries()
       .filter(([key]) => key === chatId || key.startsWith(`${chatId}::`))
-      .map(([, record]) => ({
-        chatId,
-        botId: record.botId,
-        botName: bot.config.botName,
-        sessionId: record.sessionId ?? '',
-        source: record.source,
-        at: record.at,
-      })))
+      .map(([key, record]) => {
+        const botIds = this.primary.registry.botIdsFor(key)
+        return {
+          chatId,
+          botId: record.botId,
+          botName: this.bots.find(bot => bot.config.botId === record.botId)?.config.botName ?? record.botId,
+          botIds,
+          botNames: botIds.map(id => this.bots.find(bot => bot.config.botId === id)?.config.botName ?? id),
+          sessionId: record.sessionId ?? '',
+          source: record.source,
+          at: record.at,
+        }
+      })
   }
 
   async bindToSession(chatId: string, sessionId: string, botId?: string): Promise<void> {
@@ -1442,9 +1469,7 @@ export class BotHost {
   }
 
   async unbindChat(chatId: string, botId?: string): Promise<boolean> {
-    if (botId !== undefined && botId !== '') return this.pick(botId).unbindChat(chatId)
-    const results = await Promise.all(this.bots.map(bot => bot.unbindChat(chatId)))
-    return results.some(Boolean)
+    return this.pick(botId).unbindChat(chatId)
   }
 
   async bindChat(chatId: string, sessionId: string, botId?: string): Promise<void> {
@@ -1492,7 +1517,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   const sharedSeen = new SeenStore(join(base.stateDir, 'seen.jsonl'), { logger: ctx.logger })
   const sharedChats = new ChatDirectory(base.stateDir)
   const botNames = new Map(base.bots.map(bot => [bot.id, bot.name]))
-  const bots = base.bots.map(bot => new FeishuBot(ctx, {
+  const bots = base.bots.map((bot, index) => new FeishuBot(ctx, {
     ...base,
     botId: bot.id,
     botName: bot.name,
@@ -1501,7 +1526,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     allowChats: bot.allowChats,
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
-  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames }))
+  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0 }))
   const host = new BotHost(ctx, base, bots)
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
@@ -1641,21 +1666,23 @@ function registerBindingInfoTool(ctx: HostContext, host: BotHost): void {
                 chatId: { type: 'string' },
                 botId: { type: 'string' },
                 botName: { type: 'string' },
+                botIds: { type: 'array', items: { type: 'string' } },
+                botNames: { type: 'array', items: { type: 'string' } },
                 sessionId: { type: 'string' },
                 source: { type: 'string' },
                 at: { type: 'number' },
               },
-              required: ['chatId', 'botId', 'botName', 'sessionId', 'source', 'at'],
+              required: ['chatId', 'botId', 'botName', 'botIds', 'botNames', 'sessionId', 'source', 'at'],
             },
           },
         },
         required: ['chatId', 'bindings'],
       },
-      render: (_args: unknown, value: { bindings: Array<{ botName: string; sessionId: string }> }) => [{
+      render: (_args: unknown, value: { bindings: Array<{ botName: string; botNames: string[]; sessionId: string }> }) => [{
         type: 'text',
         text: value.bindings.length === 0
           ? 'No Feishu bots are bound to this group.'
-          : value.bindings.map(binding => `${binding.botName} -> ${binding.sessionId}`).join('\n'),
+          : value.bindings.map(binding => `${binding.botNames.join(', ')} -> ${binding.sessionId}`).join('\n'),
       }],
     },
     async execute(args: { chat_id?: unknown }) {

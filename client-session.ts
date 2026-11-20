@@ -261,6 +261,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.source.manual': '手动绑定',
       'feishu.source.external': '外部绑定',
       'feishu.source.auto': '自动绑定',
+      'feishu.source.outbound': '发消息认领',
     }
 
     /** English copy (same key set). */
@@ -345,6 +346,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.source.manual': 'Manual',
       'feishu.source.external': 'External',
       'feishu.source.auto': 'Automatic',
+      'feishu.source.outbound': 'Outbound claim',
     }
 
     const CSS = `
@@ -983,7 +985,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     function FeishuPanel({ sessionId, status, loading, error, actionError, onBind, onOpenGroup, onUnbind, onReload, t }: FeishuPanelProps) {
       const bound = (status?.bindings ?? []).filter(binding => binding.sessionId === sessionId)
       const botById = new Map((status?.bots ?? []).map(bot => [bot.id, bot.name]))
-      const boundBotIds = [...new Set(bound.map(binding => binding.botId).filter((id): id is string => id !== undefined))]
+      const boundBotIds = [...new Set(bound.flatMap(binding => binding.botIds ?? (binding.botId === undefined ? [] : [binding.botId])))]
       const boundBotNames = boundBotIds.map(id => botById.get(id) ?? id)
       const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
       const boundGroups = new Map<string, FeishuBinding[]>()
@@ -1035,7 +1037,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               : h('div', null, [...boundGroups.entries()].map(([chatId, bindings]) => {
                 const binding = bindings[0]
                 const isPrivate = binding.chatType === 'p2p'
-                const names = bindings.map(item => botNameOf(item.botId)).filter(name => name !== '').join(' / ')
+                const names = [...new Set(bindings.flatMap(item => (item.botIds ?? (item.botId === undefined ? [] : [item.botId])).map(id => botNameOf(id))))].filter(name => name !== '').join(' / ')
                 return h('div', {
                 className: 'sa-feishu-row',
                 key: chatId,

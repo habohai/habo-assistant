@@ -56,23 +56,23 @@ test('binding registry resolves explicit, auto, unbound, and thread scopes', asy
   }
 })
 
-test('binding registry isolates the same chat for different bots', async () => {
+test('one conversation owns one session and keeps lazy bot grants', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'habo-binding-'))
   try {
     const registry = new BindingRegistry(dir, 'bot_a')
     await registry.ready
     await registry.bind('oc_1', '', 'ses_a', 'manual', 10, 'bot_a')
-    await registry.bind('oc_1', '', 'ses_b', 'manual', 20, 'bot_b')
-    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_a').sessionId, 'ses_a')
-    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_b').sessionId, 'ses_b')
-    assert.equal(registry.entries().length, 2)
-    await registry.unbind('oc_1', '', 30, 'bot_a')
-    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_a').kind, 'unbound')
-    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_b').kind, 'explicit')
+    await registry.bind('oc_1', '', 'ses_a', 'auto', 15, 'bot_b')
+    assert.equal(registry.resolve('oc_1', '', 'chat').sessionId, 'ses_a')
+    assert.deepEqual(registry.botIdsFor('oc_1').sort(), ['bot_a', 'bot_b'])
+    await registry.bind('oc_1', '', 'ses_b', 'outbound', 20, 'bot_b')
+    assert.equal(registry.resolve('oc_1', '', 'chat').sessionId, 'ses_b')
+    assert.deepEqual(registry.botIdsFor('oc_1'), ['bot_b'])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
 
 test('compaction preserves active, history, candidates, and suppression', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'habo-binding-'))

@@ -398,23 +398,24 @@ test('an expired p2p binding starts a fresh Session', async () => {
   }
 })
 
-test('a recent outbound group affinity wins over discovery', async () => {
+test('an outbound send claims the conversation and grants the sending bot', async () => {
   const { bot, stateDir } = await createBot()
   try {
     await bot.registry.bind('oc_1', '', 'ses_old', 'manual', Date.now())
-    await bot.registry.recordCandidate('oc_1', 'ses_sender', Date.now())
-    bot.ctx.sessionController.list = async () => ({
-      items: [{ id: 'ses_other', updatedAt: Date.now(), projectionValues: { feishuBotTask: { bot: true, chatId: 'oc_1', updatedAt: Date.now() } } }],
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.observeOutboundChat('ses_sender', {
+      type: 'tool/call',
+      data: {
+        name: 'bash',
+        arguments: JSON.stringify({ command: 'lark-cli im +messages-send --as bot --chat-id oc_1 --text hi' }),
+      },
     })
-    const event = {
-      chatId: 'oc_1', chatType: 'group', messageId: 'om_reply', threadKey: '',
-      senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: 'reply',
-    }
-    const sessionId = await bot.ensureSession('oc_1', event, 'reply')
-    assert.equal(sessionId, 'ses_sender')
-    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_sender')
+    await waitFor(() => bot.registry.get('oc_1')?.sessionId === 'ses_sender')
+    assert.equal(bot.registry.get('oc_1')?.source, 'outbound')
+    assert.equal(bot.registry.hasGrant('oc_1'), true)
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+

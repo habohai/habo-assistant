@@ -9,9 +9,10 @@
 
 ## 路由规则
 
-- 显式绑定（session 信息页 / `feishu_bind_chat` / 绑定 API）优先，存在时绝不自动新建；
-- 同一个群多个显式绑定：latest `boundAt` wins，旧绑定保留在历史但不再接收消息；
-- 自动绑定可以被“最近处理过该群的 Session”替换；
+- 一个 Conversation（群或话题）同一时间只属于一个 Session；
+- 一个 Session 可以绑定多个群/话题；
+- 从已绑定 Session 向群/话题发消息，会立即认领该 Conversation，替换原 Session；
+- Bot 是 Conversation 内的懒授权身份，只有实际用到的 bot 才授予该 Session；
 - 小 Session 直接复用；大会话会新建 Session 并注入最近几轮的上下文摘要；
 - 解绑会删除绑定、取消该群 pending turn/审批，并抑制自动回绑；下一条消息新建，重新绑定清除抑制；
 - 一个 Session 可以绑定多个群，审批按触发群路由。
@@ -59,8 +60,6 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 群名/私聊 peer 名和 bot 列表都来自缓存或 p2p 消息解析，不在源码里写死任何 open_id/chat_id。
 
-群回复在 `outboundReplyTtlMs`（默认 30 分钟）内优先回到刚发消息的 session。
-
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。
 
 回复默认要求中文、简洁、有条理；可用 `replyGuidelines` 覆盖，设为空字符串可关闭。
@@ -72,7 +71,7 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 - 首次加载会把旧的 `bindings.json` / `binding-history.json` / `chat-affinity.json` / `suppressed-chats.json` 自动迁移；
 - 旧文件保留但不删除，作为回滚/审计依据；
 - 绑定、历史、出站亲和、解绑抑制都从同一份 journal 推导，不再各写一个文件；
-- 每条记录带 `botId`（当前取 `botOpenId`/`botName`）；active / candidate / history / suppression 都按 `(botId, chat/thread)` 隔离；运行时目前仍是单 bot，多 bot 还需要 consumer 与发送身份。
+- 每条记录带 `botId`，它是这次认领/授权使用的 bot；active 唯一键是 `(chatId, threadId)`；grants 按 Conversation 懒授予 bot。
 
 去重日志 `seen.jsonl` 到上限后自动压缩；运行时群准入统一在 `chats.json`（旧的 `dynamic-chats.json` 首次加载时自动迁移）。
 
@@ -93,7 +92,7 @@ bots:
 ```
 
 - 每个 bot 独立 consumer、LarkCli、队列、审批上下文；
-- 绑定按 `(botId, chat/thread)` 隔离；
+- Conversation 按 `(chatId, threadId)` 唯一绑定，bot 作为会话内 lazy grant；
 - 会话信息页有 bot 选择器，API 支持 `botId`，`feishu_bind_chat` 支持 `bot` 参数；
 - 多 bot 时每个 bot 必须有不同 `profile`，否则启动前校验失败；
 - 当前默认仍是单 bot，未配置 `bots` 不改变行为。
