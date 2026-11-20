@@ -77,7 +77,7 @@ const zh: Record<string, string> = {
   summaryIdle: '当前没有运行中的任务',
   statusRunning: '思考中',
   statusApproval: '待审批',
-  statusIdle: '思考完成',
+  statusIdle: '已完成',
   connReady: '已连接',
   connConnecting: '连接中',
   connOffline: '未连接',
@@ -126,23 +126,25 @@ function TasksMark({ size = 16 }: { size?: number }): ReactNS.ReactElement {
   </svg>
 }
 
-/** Row status marker: animated blue while thinking, amber approval, green check when done. */
+/** Row status marker: soft tinted circle, no heavy outline noise. */
 function StatusMark({ status }: { status: TaskStatus }): ReactNS.ReactElement {
   if (status === 'approval') {
-    return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="4.6" stroke="var(--dsw-alias-state-warning-primary, #D97706)" strokeWidth="1.5" opacity=".45" />
-      <circle cx="7" cy="7" r="2.1" fill="var(--dsw-alias-state-warning-primary, #D97706)" />
+    return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-warning-primary, #D97706)" opacity=".12" />
+      <path d="M8 4.7v4.2" stroke="var(--dsw-alias-state-warning-primary, #D97706)" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="11.4" r=".9" fill="var(--dsw-alias-state-warning-primary, #D97706)" />
     </svg>
   }
   if (status === 'running') {
-    return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="4.6" stroke="var(--dsw-alias-state-business-primary, #3370FF)" strokeWidth="1.5" opacity=".35" />
-      <circle cx="7" cy="7" r="2.1" fill="var(--dsw-alias-state-business-primary, #3370FF)" className="ft-pulse" />
+    return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-business-primary, #3370FF)" opacity=".10" />
+      <circle cx="8" cy="8" r="5.1" stroke="var(--dsw-alias-state-business-primary, #3370FF)" strokeWidth="1.4" opacity=".24" />
+      <circle cx="8" cy="8" r="1.9" fill="var(--dsw-alias-state-business-primary, #3370FF)" className="ft-pulse" />
     </svg>
   }
-  return <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-    <circle cx="7" cy="7" r="4.6" stroke="var(--dsw-alias-state-success-primary, #16A34A)" strokeWidth="1.4" opacity=".5" />
-    <path d="M4.6 7.05l1.65 1.65 3.2-3.4" stroke="var(--dsw-alias-state-success-primary, #16A34A)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-success-primary, #16A34A)" opacity=".10" />
+    <path d="M5.1 8.1l1.9 1.9 3.9-4.1" stroke="var(--dsw-alias-state-success-primary, #16A34A)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity=".9" />
   </svg>
 }
 
@@ -233,20 +235,20 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     return <div className="ft-page" data-feishu-tasks="">
       <style>{`
         .ft-page { display: flex; flex-direction: column; height: 100%; min-height: 0; color: inherit; }
-        .ft-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px 6px; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
+        .ft-summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 10px 12px 7px; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
         .ft-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--dsw-alias-label-secondary); font-size: 10px; white-space: nowrap; }
-        .ft-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
-        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-live 2.4s ease-in-out infinite; }
+        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .18)); border-radius: 999px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
+        .ft-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
+        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); }
         .ft-conn.connecting .ft-live-dot { background: var(--dsw-alias-state-warning-primary, #D97706); animation: ft-live 1.6s ease-in-out infinite; }
         .ft-conn.offline .ft-live-dot { background: var(--dsw-alias-state-error-primary, #E5484D); }
         @keyframes ft-live { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
         @media (prefers-reduced-motion: reduce) { .ft-conn .ft-live-dot { animation: none; } }
         .ft-list { list-style: none; margin: 0; padding: 2px 6px 14px; overflow: auto; min-height: 0; }
-        .ft-row { box-sizing: border-box; display: flex; gap: 9px; width: 100%; padding: 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+        .ft-row { box-sizing: border-box; display: flex; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
         @media (hover: hover) { .ft-row:hover { background: var(--dsw-alias-interactive-bg-hover); } }
         .ft-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); }
-        .ft-status { flex: none; margin-top: 2px; display: block; }
+        .ft-status { flex: none; width: 16px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
         .ft-pulse { animation: ft-pulse 1.5s ease-in-out infinite; }
         @keyframes ft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
         @media (prefers-reduced-motion: reduce) { .ft-pulse { animation: none; } }
@@ -255,7 +257,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; line-height: 17px; }
         .ft-subject { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 15px; }
         .ft-time { flex: none; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; font-variant-numeric: tabular-nums; }
-        .ft-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; }
+        .ft-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; line-height: 14px; }
         .ft-sep { opacity: .5; }
         .ft-approval { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 10px; }
         .ft-empty { display: flex; flex-direction: column; gap: 4px; padding: 24px 16px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
@@ -263,14 +265,14 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-empty-hint { font-size: 11px; opacity: .8; }
       `}</style>
       <div className="ft-summary">
+        <span className={`ft-conn ${connection}`} role="status" title={t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}>
+          <span className="ft-live-dot" aria-hidden="true" />
+          {t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}
+        </span>
         <span className="ft-summary-text">
           {running + approval > 0
             ? t('summaryActive', { running: String(running), approval: String(approval) })
             : t('summaryIdle')}
-        </span>
-        <span className={`ft-conn ${connection}`} title={t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}>
-          <span className="ft-live-dot" aria-hidden="true" />
-          {t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}
         </span>
       </div>
       {visible.length === 0
