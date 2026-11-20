@@ -258,26 +258,35 @@ export class LarkCli {
 
   /** Recent topics visible in a chat, keyed by omt_ thread id. */
   async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
-    const { stdout } = await this.run([
-      'im', '+chat-messages-list',
-      '--chat-id', chatId,
-      '--as', 'bot',
-      '--order', 'desc',
-      '--page-size', '50',
-      '--no-reactions',
-      '--json',
-    ])
-    const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ thread_id?: unknown; content?: unknown; create_time?: unknown }> } }
-    const topics = new Map<string, { threadId: string; title: string; updatedAt: number }>()
-    for (const message of parsed.data?.messages ?? []) {
-      if (typeof message.thread_id !== 'string' || !message.thread_id.startsWith('omt_')) continue
-      if (topics.has(message.thread_id)) continue
-      const raw = typeof message.content === 'string' ? message.content : ''
-      const title = raw.replace(/@_user_\d+/g, ' ').replace(/[#*`>\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30)
-      const updatedAt = typeof message.create_time === 'string' ? Date.parse(message.create_time.replace(' ', 'T')) || 0 : 0
-      topics.set(message.thread_id, { threadId: message.thread_id, title: title === '' ? '话题' : title, updatedAt })
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+chat-messages-list',
+          '--chat-id', chatId,
+          '--as', identity,
+          '--order', 'desc',
+          '--page-size', '50',
+          '--no-reactions',
+          '--json',
+        ])
+        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ thread_id?: unknown; content?: unknown; create_time?: unknown }> } }
+        const topics = new Map<string, { threadId: string; title: string; updatedAt: number }>()
+        for (const message of parsed.data?.messages ?? []) {
+          if (typeof message.thread_id !== 'string' || !message.thread_id.startsWith('omt_')) continue
+          if (topics.has(message.thread_id)) continue
+          const raw = typeof message.content === 'string' ? message.content : ''
+          const title = raw.replace(/@_user_\d+/g, ' ').replace(/[#*`>\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30)
+          const updatedAt = typeof message.create_time === 'string' ? Date.parse(message.create_time.replace(' ', 'T')) || 0 : 0
+          topics.set(message.thread_id, { threadId: message.thread_id, title: title === '' ? '话题' : title, updatedAt })
+        }
+        const list = [...topics.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+        if (list.length > 0 || identity === 'user') return list
+      } catch (error) {
+        lastError = error
+      }
     }
-    return [...topics.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+    throw lastError instanceof Error ? lastError : new Error('cannot list topics')
   }
 
   /** Resolve the chat/topic context of one message (used for reply-to-topic claims). */

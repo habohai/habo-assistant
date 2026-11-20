@@ -253,6 +253,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.topicLabel': '话题',
       'feishu.topicMain': '群主会话',
       'feishu.topicLoading': '正在读取话题…',
+      'feishu.topicHint': '选中群后，可选群主会话或该群下的某个话题。',
+      'feishu.topicEmpty': '该群暂未读取到话题，将绑定群主会话。',
       'feishu.groupHint': '查看绑定的会话',
       'feishu.groupDetail': '群绑定详情',
       'feishu.bindingsTitle': '飞书群/话题信息',
@@ -344,6 +346,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.topicLabel': 'Topic',
       'feishu.topicMain': 'Main conversation',
       'feishu.topicLoading': 'Reading topics…',
+      'feishu.topicHint': 'After choosing a group, pick the main conversation or one of its topics.',
+      'feishu.topicEmpty': 'No topics were readable; the main conversation will be bound.',
       'feishu.groupHint': 'View bound sessions',
       'feishu.groupDetail': 'Group bindings',
       'feishu.bindingsTitle': 'Feishu group/topic info',
@@ -457,7 +461,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-group-bot { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .sa-group-bot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-group-bot-state { color: var(--dsw-alias-state-success-primary); }
-.sa-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; min-height: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.sa-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; min-height: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .sa-chat { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 7px 8px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
 @media (hover: hover) { .sa-chat:hover { background: var(--dsw-alias-interactive-bg-hover); } }
 .sa-chat[aria-selected='true'] { border-color: var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-layer-3); }
@@ -1195,6 +1199,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             h('button', { type: 'button', className: 'sa-dialog-close', 'aria-label': t('feishu.cancel'), onClick: onClose }, '×'),
           ),
           h('div', { className: 'sa-dialog-desc' }, t('feishu.bindHint')),
+          h('div', { className: 'sa-dialog-desc' }, t('feishu.topicHint')),
           h('div', { className: 'sa-dialog-body' },
             h('input', {
               className: 'sa-input',
@@ -1243,7 +1248,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
                 }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
               ),
-            selectedChat === undefined || topics.length === 0
+            selectedChat === undefined
               ? null
               : h('label', { className: 'sa-bot-picker' },
                 h('span', null, t('feishu.topicLabel')),
@@ -1256,7 +1261,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   topics.map(topic => h('option', { key: topic.threadId, value: topic.threadId }, topic.title)),
                 ),
               ),
-            topicsLoading ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicLoading')) : null,
+            topicsLoading
+              ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicLoading'))
+              : selectedChat !== undefined && topics.length === 0
+                ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicEmpty'))
+                : null,
             h('button', {
               type: 'button',
               className: 'sa-manual-toggle',
