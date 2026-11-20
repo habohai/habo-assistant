@@ -1096,6 +1096,11 @@ export class FeishuBot {
       // Unbound explicitly: do not silently rebind the old Session.
       return this.createSessionForChat(key, event, text)
     }
+    if (event.chatType === 'p2p' && resolution.kind === 'candidate') {
+      // A direct chat should not inherit an unrelated session's outbound
+      // affinity candidate; start a clean p2p session instead.
+      return this.createSessionForChat(key, event, text)
+    }
     const discovered = await this.findSessionForChat(event.chatId)
     if (discovered !== undefined && discovered !== known) {
       const digest = await this.sessionDigest(discovered)
