@@ -250,10 +250,13 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         @keyframes ft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
         @media (prefers-reduced-motion: reduce) { .ft-pulse { animation: none; } }
         .ft-body { flex: 1; min-width: 0; }
-        .ft-line { display: flex; align-items: baseline; gap: 8px; }
-        .ft-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; line-height: 17px; }
+        .ft-line { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+        .ft-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; line-height: 17px; }
+        .ft-state { flex: 0 0 auto; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; line-height: 14px; white-space: nowrap; }
+        .ft-state.running { color: var(--dsw-alias-state-business-primary, #3370FF); }
+        .ft-state.approval { color: var(--dsw-alias-state-warning-primary, #D97706); }
         .ft-subject { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 15px; }
-        .ft-time { flex: none; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; font-variant-numeric: tabular-nums; }
+        .ft-time { flex: 0 0 auto; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .ft-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; line-height: 14px; }
         .ft-sep { opacity: .5; }
         .ft-approval { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 10px; }
@@ -303,6 +306,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
               <span className="ft-body">
                 <span className="ft-line">
                   <span className="ft-title">{sessionDisplayTitle(row, id)}</span>
+                  <span className={`ft-state ${task.status}`}>{task.status === 'approval' ? t('statusApproval') : task.status === 'running' ? t('statusRunning') : t('statusIdle')}</span>
                   <span className="ft-time">
                     {task.status === 'idle'
                       ? formatClock(task.updatedAt)
