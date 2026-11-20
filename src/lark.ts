@@ -37,6 +37,19 @@ export interface LarkOptions {
   logger?: Pick<Logger, 'info' | 'debug' | 'warn'>
 }
 
+/** Parse a CLI JSON envelope even when the CLI prints progress lines first. */
+function parseCliJson<T>(stdout: string): T {
+  const text = stdout.trim()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1)) as T
+    throw new Error(`lark-cli did not return JSON: ${text.slice(0, 120)}`)
+  }
+}
+
 /**
  * Pull the created message id out of a `lark-cli` success envelope.
  * @param {string} stdout
@@ -44,7 +57,7 @@ export interface LarkOptions {
  */
 export function parseMessageId(stdout: string): string | undefined {
   try {
-    const parsed = JSON.parse(stdout) as { data?: { message_id?: unknown }; message_id?: unknown }
+    const parsed = parseCliJson(stdout) as { data?: { message_id?: unknown }; message_id?: unknown }
     const id = parsed?.data?.message_id ?? parsed?.message_id
     return typeof id === 'string' && id !== '' ? id : undefined
   } catch {
@@ -166,7 +179,7 @@ export class LarkCli {
     for (const identity of ['bot', 'user'] as const) {
       try {
         const { stdout } = await this.run(['im', '+chat-list', '--as', identity, '--page-size', '100', '--json'])
-        const parsed = JSON.parse(stdout) as { data?: { chats?: Array<{ chat_id?: unknown; name?: unknown }> } }
+        const parsed = parseCliJson(stdout) as { data?: { chats?: Array<{ chat_id?: unknown; name?: unknown }> } }
         for (const chat of parsed.data?.chats ?? []) {
           if (typeof chat.chat_id !== 'string' || typeof chat.name !== 'string') continue
           const existing = merged.get(chat.chat_id)
@@ -200,7 +213,7 @@ export class LarkCli {
         '--page-size', '20',
         '--json',
       ])
-      const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ sender?: { sender_type?: unknown; name?: unknown } }> } }
+      const parsed = parseCliJson(stdout) as { data?: { messages?: Array<{ sender?: { sender_type?: unknown; name?: unknown } }> } }
       for (const message of parsed.data?.messages ?? []) {
         const sender = message.sender
         if (sender?.sender_type !== 'user') continue
@@ -242,7 +255,7 @@ export class LarkCli {
           '--as', identity,
           '--json',
         ])
-        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
+        const parsed = parseCliJson(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
         const message = parsed.data?.messages?.[0]
         if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
         return {
@@ -270,7 +283,7 @@ export class LarkCli {
           '--no-reactions',
           '--json',
         ])
-        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ thread_id?: unknown; content?: unknown; create_time?: unknown }> } }
+        const parsed = parseCliJson(stdout) as { data?: { messages?: Array<{ thread_id?: unknown; content?: unknown; create_time?: unknown }> } }
         const topics = new Map<string, { threadId: string; title: string; updatedAt: number }>()
         for (const message of parsed.data?.messages ?? []) {
           if (typeof message.thread_id !== 'string' || !message.thread_id.startsWith('omt_')) continue
@@ -300,7 +313,7 @@ export class LarkCli {
           '--as', identity,
           '--json',
         ])
-        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
+        const parsed = parseCliJson(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
         const message = parsed.data?.messages?.[0]
         if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
         return {
@@ -327,7 +340,7 @@ export class LarkCli {
           '--page-all',
           '--json',
         ])
-        const parsed = JSON.parse(stdout) as { data?: { users?: Array<{ member_id?: unknown }> } }
+        const parsed = parseCliJson(stdout) as { data?: { users?: Array<{ member_id?: unknown }> } }
         return new Set((parsed.data?.users ?? [])
           .map(user => user.member_id)
           .filter((id): id is string => typeof id === 'string' && id !== ''))
