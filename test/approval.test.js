@@ -52,7 +52,7 @@ async function createBot(config = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'feishu-bot-approval-'))
   const harness = createApprovalHarness()
   const bot = new FeishuBot(harness.ctx, normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], stateDir, ...config }))
-  await bot.bindings.ready
+  await bot.registry.ready
   await bot.seen.load()
   return { bot, stateDir, ...harness }
 }

@@ -108,47 +108,7 @@ interface ClientLocale {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void
 }
 
-interface FeishuBinding {
-  chatId: string
-  sessionId: string
-  chatName?: string
-  botMember?: boolean
-}
-
-interface FeishuChat {
-  chatId: string
-  name: string
-  botMember?: boolean
-  allowed: boolean
-  bound: boolean
-}
-
-interface FeishuStatus {
-  ready?: boolean
-  consumer?: boolean
-  bindings: FeishuBinding[]
-  bot?: { name?: string; openId?: string }
-}
-
-interface FeishuSessionBinding {
-  sessionId: string
-  at: number
-  source: string
-  current: boolean
-}
-
-interface FeishuGroupDetail {
-  chatId: string
-  chatName?: string
-  botMember: boolean
-  sessions: FeishuSessionBinding[]
-}
-
-interface ApiEnvelope<T> {
-  ok: boolean
-  value?: T
-  error?: string
-}
+import { FEISHU_API, fetchFeishuApi, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
 
 interface ClientContext {
   locale: ClientLocale
@@ -944,23 +904,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       )
     }
 
-    const FEISHU_API = '/feishu-bot/api'
-
-    /** Call the Feishu bot plugin's Web API and unwrap `{ ok, value }`. */
-    async function fetchApi<T>(url: string, init?: RequestInit): Promise<T> {
-      const response = await fetch(url, init)
-      let payload: ApiEnvelope<T>
-      try {
-        payload = await response.json() as ApiEnvelope<T>
-      } catch {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      if (!response.ok || payload.ok !== true) {
-        throw new Error(typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`)
-      }
-      return payload.value as T
-    }
-
     /** Load Feishu bindings, with an explicit reload trigger. */
     function useFeishu(): { data?: FeishuStatus; loading: boolean; error: string; reload: () => void } {
       const [data, setData] = useState<FeishuStatus | undefined>(undefined)
@@ -970,7 +913,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       useEffect(() => {
         let alive = true
         setLoading(true)
-        fetchApi<FeishuStatus>(`${FEISHU_API}?action=status&refresh=1`)
+        fetchFeishuApi<FeishuStatus>(`${FEISHU_API}?action=status&refresh=1`)
           .then(value => {
             if (!alive) return
             setData({ ...value, bindings: Array.isArray(value.bindings) ? value.bindings : [] })
@@ -1375,7 +1318,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const loadChats = (): void => {
         setChatsLoading(true)
         setChatsError('')
-        fetchApi<{ chats: FeishuChat[] }>(`${FEISHU_API}?action=chats&refresh=1`)
+        fetchFeishuApi<{ chats: FeishuChat[] }>(`${FEISHU_API}?action=chats&refresh=1`)
           .then(value => { setChats(Array.isArray(value.chats) ? value.chats : []) })
           .catch(reason => {
             setChats([])
@@ -1392,7 +1335,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         if (chatId === '' || binding) return
         setBinding(true)
         setActionError('')
-        fetchApi<FeishuStatus>(FEISHU_API, {
+        fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ action: 'bind', chatId, sessionId }),
@@ -1406,7 +1349,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       }
       const unbindChat = (chatId: string): void => {
         setActionError('')
-        fetchApi<FeishuStatus>(FEISHU_API, {
+        fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ action: 'unbind', chatId }),
@@ -1423,7 +1366,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         setGroup(undefined)
         setGroupError('')
         setGroupLoading(true)
-        fetchApi<FeishuGroupDetail>(`${FEISHU_API}?action=group&chatId=${encodeURIComponent(target.chatId)}`)
+        fetchFeishuApi<FeishuGroupDetail>(`${FEISHU_API}?action=group&chatId=${encodeURIComponent(target.chatId)}`)
           .then(value => { setGroup(value) })
           .catch(reason => { setGroupError(reason instanceof Error ? reason.message : String(reason)) })
           .finally(() => { setGroupLoading(false) })

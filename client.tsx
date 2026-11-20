@@ -1,5 +1,6 @@
 import type * as ReactNS from 'react'
 import { createSessionInfoPlugin } from './client-session.js'
+import { useFeishuConnection } from './client-shared.js'
 
 declare global {
   namespace JSX {
@@ -10,7 +11,6 @@ declare global {
 }
 
 type TaskStatus = 'idle' | 'running' | 'approval'
-type ConnectionState = 'ready' | 'connecting' | 'offline'
 
 interface TaskView {
   bot: boolean
@@ -180,27 +180,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     t: TFunction
   }): ReactNS.ReactElement {
     const { t } = props
-    const [connection, setConnection] = React.useState<ConnectionState>('connecting')
-    React.useEffect(() => {
-      let disposed = false
-      const poll = async (): Promise<void> => {
-        try {
-          const response = await fetch('/feishu-bot/api/status', { headers: { accept: 'application/json' } })
-          const body = await response.json() as { ok?: boolean; value?: { ready?: boolean; consumer?: boolean } }
-          if (disposed) return
-          const value = body.value
-          if (body.ok !== true || value === undefined) setConnection('offline')
-          else if (value.ready === true && value.consumer === true) setConnection('ready')
-          else if (value.consumer === true) setConnection('connecting')
-          else setConnection('offline')
-        } catch {
-          if (!disposed) setConnection('offline')
-        }
-      }
-      void poll()
-      const timer = setInterval(() => { void poll() }, 3000)
-      return () => { disposed = true; clearInterval(timer) }
-    }, [])
+    const connection = useFeishuConnection(React)
     const useSessions = props.useSessions as <T>(selector: (state: SessionsState) => T) => T
     const state = useSessions(snapshot => snapshot)
     React.useEffect(() => {

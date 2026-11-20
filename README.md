@@ -46,7 +46,13 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
     autoEnableApproverChats: true
 ```
 
-`stateDir` 默认仍是 `~/.dsh/feishu-bot`，绑定、去重日志、亲和性、抑制标记都沿用，不需要迁移。
+`stateDir` 默认仍是 `~/.dsh/feishu-bot`。绑定状态现在统一为 append-only 的 `binding-state.v2.jsonl`：
+
+- 首次加载会把旧的 `bindings.json` / `binding-history.json` / `chat-affinity.json` / `suppressed-chats.json` 自动迁移；
+- 旧文件保留但不删除，作为回滚/审计依据；
+- 绑定、历史、出站亲和、解绑抑制都从同一份 journal 推导，不再各写一个文件。
+
+去重日志仍在 `seen.jsonl`，群白名单位于 `dynamic-chats.json`。
 
 ## API
 

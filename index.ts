@@ -30,8 +30,7 @@ import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
 import type { HostContext, Job, SessionEventLike, SessionLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
-import { BindingStore } from './src/bindings.js'
-import { BindingHistoryStore } from './src/history.js'
+import { BindingRegistry } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
 import { SeenStore } from './src/dedup.js'
 import { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
@@ -52,7 +51,7 @@ const MAX_BACKOFF_MS = 15_000
 const BACKOFF_JITTER = 0.2
 
 export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangerousCommand, parseApprovalReply, summarizeCommand } from './src/approval.js'
-export { BindingStore } from './src/bindings.js'
+export { BindingRegistry } from './src/binding-registry.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
@@ -103,7 +102,7 @@ export class FeishuBot {
   readonly ctx: HostContext
   readonly config: Config
   private readonly routing: 'chat' | 'thread'
-  readonly bindings: BindingStore
+  readonly registry: BindingRegistry
   readonly seen: SeenStore
   readonly metrics: Metrics
   private readonly cli: LarkCli
@@ -130,23 +129,16 @@ export class FeishuBot {
   private reactionOff: boolean
   private lastEventAt: number
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
-  private readonly chatAffinity: Map<string, { sessionId: string; at: number }>
-  private readonly chatAffinityFile: string
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
-  private readonly suppressedChats: Set<string>
-  private readonly suppressedChatsFile: string
   /** Chats enabled at runtime by the bind tool, persisted separately from the profile. */
   private readonly dynamicChats: Set<string>
   private readonly dynamicChatsFile: string
-  /** Display-only history of sessions each group pointed at. */
-  private readonly history: BindingHistoryStore
 
   constructor(ctx: HostContext, config: Config) {
     this.ctx = ctx
     this.config = config
     this.routing = config.routing
-    this.bindings = new BindingStore(config.stateDir)
-    this.history = new BindingHistoryStore(config.stateDir)
+    this.registry = new BindingRegistry(config.stateDir)
     this.seen = new SeenStore(join(config.stateDir, 'seen.jsonl'), { logger: ctx.logger })
     this.metrics = new Metrics()
     this.cli = new LarkCli(ctx, {
@@ -179,17 +171,13 @@ export class FeishuBot {
     this.reactionOff = false
     this.lastEventAt = 0
     this.sessionLookup = new Map()
-    this.chatAffinity = new Map()
-    this.chatAffinityFile = join(config.stateDir, 'chat-affinity.json')
     this.digestCache = new Map()
-    this.suppressedChats = new Set()
-    this.suppressedChatsFile = join(config.stateDir, 'suppressed-chats.json')
     this.dynamicChats = new Set()
     this.dynamicChatsFile = join(config.stateDir, 'dynamic-chats.json')
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.bindings.ready, this.history.ready, this.seen.load(), this.loadDynamicChats(), this.loadChatAffinity(), this.loadSuppressedChats()])
+    await Promise.all([this.registry.ready, this.seen.load(), this.loadDynamicChats()])
     if (this.stopping) return
     const problem = configProblem(this.config)
     if (problem !== undefined) {
@@ -200,10 +188,9 @@ export class FeishuBot {
     if (this.config.progress && !this.canEdit) {
       this.ctx.logger.warn('feishu-bot: lark-cli cannot edit messages (+messages-edit, needs >= 1.0.100); placeholder replies are disabled')
     }
-    for (const [key, sessionId] of this.bindings.entries()) {
-      const chatId = key.split('::')[0]
-      this.trackSession(sessionId, chatId)
-      await this.history.record(chatId, sessionId, this.bindings.boundAt(key), this.bindings.source(key))
+    for (const [key, record] of this.registry.entries()) {
+      if (record.sessionId === undefined) continue
+      this.trackSession(record.sessionId, key.split('::')[0])
     }
     this.installApprovalGate()
     this.ctx.on('session/event', (session, event) => {
@@ -577,63 +564,8 @@ export class FeishuBot {
   }
 
   private recordChatAffinity(chatId: string, sessionId: string, at: number): Promise<void> {
-    const current = this.chatAffinity.get(chatId)
-    if (current !== undefined && current.sessionId === sessionId && current.at >= at) return Promise.resolve()
-    this.chatAffinity.set(chatId, { sessionId, at })
     this.sessionLookup.delete(chatId)
-    return this.persistChatAffinity().catch(error => {
-      this.ctx.logger.warn(`feishu-bot: cannot persist chat affinity: ${String(error)}`)
-    })
-  }
-
-  private async loadChatAffinity(): Promise<void> {
-    let raw: string
-    try {
-      raw = await readFile(this.chatAffinityFile, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.ctx.logger.warn(`feishu-bot: cannot read ${this.chatAffinityFile}: ${String(error)}`)
-      }
-      return
-    }
-    try {
-      const parsed = JSON.parse(raw) as Record<string, { sessionId?: unknown; at?: unknown }>
-      for (const [chatId, entry] of Object.entries(parsed)) {
-        if (typeof entry?.sessionId === 'string' && typeof entry.at === 'number') {
-          this.chatAffinity.set(chatId, { sessionId: entry.sessionId, at: entry.at })
-        }
-      }
-    } catch (error) {
-      this.ctx.logger.warn(`feishu-bot: invalid ${this.chatAffinityFile}: ${String(error)}`)
-    }
-  }
-
-  private async loadSuppressedChats(): Promise<void> {
-    try {
-      const parsed = JSON.parse(await readFile(this.suppressedChatsFile, 'utf8')) as unknown
-      if (!Array.isArray(parsed)) return
-      for (const value of parsed) {
-        if (typeof value === 'string' && value.startsWith('oc_')) this.suppressedChats.add(value)
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.ctx.logger.warn(`feishu-bot: cannot read ${this.suppressedChatsFile}: ${String(error)}`)
-      }
-    }
-  }
-
-  private async persistSuppressedChats(): Promise<void> {
-    await mkdir(this.config.stateDir, { recursive: true })
-    const temp = `${this.suppressedChatsFile}.${process.pid}.tmp`
-    await writeFile(temp, JSON.stringify([...this.suppressedChats], null, 2), 'utf8')
-    await rename(temp, this.suppressedChatsFile)
-  }
-
-  private async persistChatAffinity(): Promise<void> {
-    await mkdir(this.config.stateDir, { recursive: true })
-    const temp = `${this.chatAffinityFile}.${process.pid}.tmp`
-    await writeFile(temp, JSON.stringify(Object.fromEntries(this.chatAffinity), null, 2), 'utf8')
-    await rename(temp, this.chatAffinityFile)
+    return this.registry.recordCandidate(chatId, sessionId, at)
   }
 
   /** Safe health snapshot for the Client status poller. */
@@ -644,7 +576,7 @@ export class FeishuBot {
       stopping: this.stopping,
       lastEventAt: this.lastEventAt,
       approvals: this.approvals.size,
-      bindings: this.bindings.map.size,
+      bindings: this.registry.entries().length,
       dynamicChats: this.dynamicChats.size,
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
@@ -659,23 +591,24 @@ export class FeishuBot {
   async bindingSummaries(force = false): Promise<Array<{ chatId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
-    return this.bindings.entries().map(([key, sessionId]) => {
+    return this.registry.entries().flatMap(([key, record]) => {
+      if (record.sessionId === undefined) return []
       const chatId = key.split('::')[0]
       const info = byId.get(chatId)
-      return {
+      return [{
         chatId,
-        sessionId,
-        source: this.bindings.source(key),
-        boundAt: this.bindings.boundAt(key),
+        sessionId: record.sessionId,
+        source: record.source,
+        boundAt: record.at,
         ...(info === undefined || info.name === '' ? {} : { chatName: info.name }),
         botMember: info?.botMember === true,
-      }
+      }]
     })
   }
 
   /** Every chat the bot can see, annotated with allowlist/binding state. */
   async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>> {
-    const bound = new Set(this.bindings.entries().map(([key]) => key.split('::')[0]))
+    const bound = new Set(this.registry.entries().map(([key]) => key.split('::')[0]))
     const chats = await this.cli.listChats(force)
     return chats.map(chat => ({
       ...chat,
@@ -694,14 +627,13 @@ export class FeishuBot {
 
   /** Remove every binding for one chat and suppress automatic re-discovery. */
   async unbindChat(chatId: string): Promise<boolean> {
-    const keys = this.bindings.entries()
+    const records = this.registry.entries()
       .filter(([key]) => key === chatId || key.startsWith(`${chatId}::`))
-      .map(([key]) => key)
-    if (keys.length === 0) return false
+    if (records.length === 0) return false
     if (this.approvals.has(chatId)) this.settleApproval(chatId, 'cancelled')
-    for (const key of keys) {
-      const sessionId = this.bindings.get(key)
-      await this.bindings.delete(key)
+    for (const [, record] of records) {
+      const sessionId = record.sessionId
+      await this.registry.unbind(record.chatId, record.threadId ?? '')
       if (sessionId === undefined) continue
       const pending = this.pending.get(sessionId)
       if (pending?.chatId === chatId) {
@@ -714,10 +646,6 @@ export class FeishuBot {
       }
       this.untrackSession(sessionId, chatId)
     }
-    this.chatAffinity.delete(chatId)
-    await this.persistChatAffinity()
-    this.suppressedChats.add(chatId)
-    await this.persistSuppressedChats()
     return true
   }
 
@@ -738,13 +666,14 @@ export class FeishuBot {
   }> {
     const info = await this.cli.chatInfo(chatId, true)
     const active = new Map<string, { source: string; at: number }>()
-    for (const [key, sessionId] of this.bindings.entries()) {
+    for (const [key, record] of this.registry.entries()) {
       if (key !== chatId && !key.startsWith(`${chatId}::`)) continue
-      active.set(sessionId, { source: this.bindings.source(key), at: this.bindings.boundAt(key) })
+      if (record.sessionId !== undefined) active.set(record.sessionId, { source: record.source, at: record.at })
     }
     const merged = new Map<string, { sessionId: string; at: number; source: string; current: boolean }>()
-    for (const entry of this.history.list(chatId)) {
-      merged.set(entry.sessionId, { ...entry, current: active.has(entry.sessionId) })
+    for (const entry of this.registry.listByChat(chatId)) {
+      if (entry.sessionId === undefined) continue
+      merged.set(entry.sessionId, { sessionId: entry.sessionId, at: entry.at, source: entry.source, current: active.has(entry.sessionId) })
     }
     for (const [sessionId, meta] of active) {
       const previous = merged.get(sessionId)
@@ -755,9 +684,9 @@ export class FeishuBot {
         current: true,
       })
     }
-    const affinity = this.chatAffinity.get(chatId)
-    if (affinity !== undefined && !merged.has(affinity.sessionId)) {
-      merged.set(affinity.sessionId, { sessionId: affinity.sessionId, at: affinity.at, source: 'auto', current: false })
+    const candidate = this.registry.candidateFor(chatId)
+    if (candidate?.sessionId !== undefined && !merged.has(candidate.sessionId)) {
+      merged.set(candidate.sessionId, { sessionId: candidate.sessionId, at: candidate.at, source: 'auto', current: false })
     }
     return {
       chatId,
@@ -787,13 +716,13 @@ export class FeishuBot {
   canControl(chatId: string): boolean {
     if (this.config.allowChats.includes('*') || this.config.allowChats.includes(chatId)) return true
     if (this.approvals.has(chatId)) return true
-    return this.bindings.entries().some(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+    return this.registry.entries().some(([key]) => key === chatId || key.startsWith(`${chatId}::`))
   }
 
   /** Cancel the running turn and drop this chat's queued jobs. */
   stopChat(event: FeishuEvent): void {
     const key = bindingKey(event.chatId, event.threadKey, this.routing)
-    const sessionId = this.bindings.get(key)
+    const sessionId = this.registry.get(key)?.sessionId
     let stopped = false
     if (this.approvals.has(event.chatId)) {
       this.settleApproval(event.chatId, 'cancelled')
@@ -868,12 +797,13 @@ export class FeishuBot {
       } else {
         this.metrics.inc('jobsFailed')
         this.ctx.logger.error(`feishu-bot: prompt failed session=${sessionId}: ${String(error)}`)
-        if (this.bindings.isExplicit(key)) {
+        const current = this.registry.get(key)
+        if (current?.source === 'manual' || current?.source === 'external') {
           // An explicit binding must fail closed: keep it so the next message
           // cannot silently fall back to a new Session.
           await this.deliver(event, await placeholder$, ['该群绑定的会话已失效，请重新绑定或解绑；我不会自动新建会话。'])
         } else {
-          await this.bindings.delete(key)
+          if (current !== undefined) await this.registry.unbind(current.chatId, current.threadId ?? '')
           this.untrackSession(sessionId, event.chatId)
           await this.deliver(event, await placeholder$, ['会话已失效或处理失败，下一条消息会重新建立会话。'])
         }
@@ -994,18 +924,17 @@ export class FeishuBot {
 
   /** Write the authoritative binding and its display history together. */
   private async setBinding(key: string, sessionId: string, source: 'auto' | 'manual' | 'external'): Promise<void> {
-    const at = Date.now()
-    await this.bindings.set(key, sessionId, source, at)
-    await this.history.record(key.split('::')[0], sessionId, at, source)
+    const index = key.indexOf('::')
+    const chatId = index === -1 ? key : key.slice(0, index)
+    const threadId = index === -1 ? '' : key.slice(index + 2)
+    await this.registry.bind(chatId, threadId, sessionId, source)
   }
 
   async bindChat(chatId: string, sessionId: string, source: 'manual' | 'external' = 'manual'): Promise<void> {
     await this.assertBindableChat(chatId)
-    await this.bindings.ready
     const key = bindingKey(chatId, '', this.routing)
-    const previous = this.bindings.get(key)
+    const previous = this.registry.get(key)?.sessionId
     await this.setBinding(key, sessionId, source)
-    if (this.suppressedChats.delete(chatId)) await this.persistSuppressedChats()
     await this.recordChatAffinity(chatId, sessionId, Date.now())
     if (previous !== undefined && previous !== sessionId) this.untrackSession(previous, chatId)
     this.trackSession(sessionId, chatId)
@@ -1066,9 +995,9 @@ export class FeishuBot {
   private async findSessionForChat(chatId: string): Promise<string | undefined> {
     const cached = this.sessionLookup.get(chatId)
     if (cached !== undefined && Date.now() - cached.at < 10_000) return cached.sessionId
-    const affinity = this.chatAffinity.get(chatId)
+    const candidate = this.registry.candidateFor(chatId)
     const list = this.ctx.sessionController.list
-    if (typeof list !== 'function') return affinity?.sessionId
+    if (typeof list !== 'function') return candidate?.sessionId
     try {
       const signal = new AbortController().signal
       const result = await list.call(this.ctx.sessionController, {}, signal)
@@ -1081,12 +1010,12 @@ export class FeishuBot {
         const at = typeof task.updatedAt === 'number' ? task.updatedAt : (item.updatedAt ?? 0)
         if (best === undefined || at > best.at) best = { sessionId: item.id, at }
       }
-      if (affinity !== undefined && (best === undefined || affinity.at > best.at)) best = { sessionId: affinity.sessionId, at: affinity.at }
+      if (candidate?.sessionId !== undefined && (best === undefined || candidate.at > best.at)) best = { sessionId: candidate.sessionId, at: candidate.at }
       this.sessionLookup.set(chatId, { at: Date.now(), ...(best === undefined ? {} : { sessionId: best.sessionId }) })
       return best?.sessionId
     } catch (error) {
       this.ctx.logger.debug(`feishu-bot: cannot discover chat ${chatId}: ${String(error)}`)
-      return affinity?.sessionId
+      return candidate?.sessionId
     }
   }
 
@@ -1166,9 +1095,10 @@ export class FeishuBot {
   }
 
   async ensureSession(key: string, event: FeishuEvent, text: string): Promise<string> {
-    const known = this.bindings.get(key)
+    const resolution = this.registry.resolve(event.chatId, event.threadKey, this.routing)
+    const known = 'sessionId' in resolution ? resolution.sessionId : undefined
     const workspace = this.workspace()
-    if (known !== undefined && this.bindings.isExplicit(key)) {
+    if (known !== undefined && resolution.kind === 'explicit') {
       // Explicit/manual binding is authoritative: never discover, digest, or create.
       if (workspace !== undefined && !workspace.sessionIds.includes(known)) {
         try {
@@ -1180,10 +1110,8 @@ export class FeishuBot {
       this.trackSession(known, event.chatId)
       return known
     }
-    if (this.suppressedChats.has(event.chatId)) {
+    if (resolution.kind === 'unbound') {
       // Unbound explicitly: do not silently rebind the old Session.
-      this.suppressedChats.delete(event.chatId)
-      await this.persistSuppressedChats()
       return this.createSessionForChat(key, event, text)
     }
     const discovered = await this.findSessionForChat(event.chatId)

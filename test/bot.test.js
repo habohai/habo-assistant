@@ -63,7 +63,7 @@ async function createBot(options = {}, config = {}) {
   const bot = new FeishuBot(harness.ctx, normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], stateDir, ...config }))
   // The capability probe normally fills this in `start()`, which the harness skips.
   bot.canEdit = options.canEdit ?? true
-  await bot.bindings.ready
+  await bot.registry.ready
   await bot.seen.load()
   return { bot, stateDir, ...harness }
 }
@@ -258,7 +258,7 @@ test('allowChat persists a runtime-enabled group and bindChat points it at a ses
 
     bot.cli.chatInfo = async chatId => ({ chatId, name: 'Runtime group', botMember: true })
     await bot.bindChat('oc_runtime', 'ses_branch')
-    assert.equal(bot.bindings.get('oc_runtime'), 'ses_branch')
+    assert.equal(bot.registry.get('oc_runtime')?.sessionId, 'ses_branch')
     assert.equal(bot.isBotSession('ses_branch'), true)
   } finally {
     await bot.dispose()
@@ -271,7 +271,7 @@ test('bindChat refuses a group the bot is not in', async () => {
   try {
     bot.cli.chatInfo = async chatId => ({ chatId, name: 'User-only group', botMember: false })
     await assert.rejects(bot.bindChat('oc_user_only', 'ses_branch'), /机器人不在该群/)
-    assert.equal(bot.bindings.get('oc_user_only'), undefined)
+    assert.equal(bot.registry.get('oc_user_only'), undefined)
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -294,7 +294,7 @@ test('ensureSession reuses the most recent session that handled the chat', async
     }
     const sessionId = await bot.ensureSession('oc_1', event, 'hi')
     assert.equal(sessionId, 'ses_new')
-    assert.equal(bot.bindings.get('oc_1'), 'ses_new')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_new')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -311,7 +311,7 @@ test('ensureSession creates only when the chat has no session history', async ()
     }
     const sessionId = await bot.ensureSession('oc_1', event, 'hi')
     assert.equal(sessionId, 'ses_1')
-    assert.equal(bot.bindings.get('oc_1'), 'ses_1')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_1')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -321,7 +321,7 @@ test('ensureSession creates only when the chat has no session history', async ()
 test('an explicit binding wins even when another session is more recent and large', async () => {
   const { bot, stateDir } = await createBot()
   try {
-    await bot.bindings.set('oc_1', 'ses_explicit', 'manual', 1)
+    await bot.registry.bind('oc_1', '', 'ses_explicit', 'manual', 1)
     bot.trackSession('ses_explicit', 'oc_1')
     bot.ctx.sessionController.list = async () => ({
       items: [{ id: 'ses_recent', updatedAt: 200, projectionValues: { feishuBotTask: { bot: true, chatId: 'oc_1', updatedAt: 200 } } }],
@@ -332,7 +332,7 @@ test('an explicit binding wins even when another session is more recent and larg
     }
     const sessionId = await bot.ensureSession('oc_1', event, 'hi')
     assert.equal(sessionId, 'ses_explicit')
-    assert.equal(bot.bindings.get('oc_1'), 'ses_explicit')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_explicit')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -342,11 +342,11 @@ test('an explicit binding wins even when another session is more recent and larg
 test('a later explicit bind replaces the previous owner for the chat', async () => {
   const { bot, stateDir } = await createBot()
   try {
-    await bot.bindings.set('oc_1', 'ses_a', 'manual', 10)
-    await bot.bindings.set('oc_1', 'ses_b', 'manual', 20)
-    assert.equal(bot.bindings.get('oc_1'), 'ses_b')
-    assert.equal(bot.bindings.source('oc_1'), 'manual')
-    assert.equal(bot.bindings.boundAt('oc_1'), 20)
+    await bot.registry.bind('oc_1', '', 'ses_a', 'manual', 10)
+    await bot.registry.bind('oc_1', '', 'ses_b', 'manual', 20)
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_b')
+    assert.equal(bot.registry.get('oc_1')?.source, 'manual')
+    assert.equal(bot.registry.get('oc_1')?.at, 20)
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -356,7 +356,7 @@ test('a later explicit bind replaces the previous owner for the chat', async () 
 test('unbind suppresses discovery and the next message starts a fresh session', async () => {
   const { bot, stateDir } = await createBot()
   try {
-    await bot.bindings.set('oc_1', 'ses_old', 'manual')
+    await bot.registry.bind('oc_1', '', 'ses_old', 'manual')
     bot.trackSession('ses_old', 'oc_1')
     let listed = false
     bot.ctx.sessionController.list = async () => {
@@ -364,7 +364,7 @@ test('unbind suppresses discovery and the next message starts a fresh session', 
       return { items: [{ id: 'ses_old', updatedAt: 1, projectionValues: { feishuBotTask: { bot: true, chatId: 'oc_1', updatedAt: 1 } } }] }
     }
     assert.equal(await bot.unbindChat('oc_1'), true)
-    assert.equal(bot.bindings.get('oc_1'), undefined)
+    assert.equal(bot.registry.get('oc_1'), undefined)
     const event = {
       chatId: 'oc_1', chatType: 'group', messageId: 'om_new', threadKey: '',
       senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: 'hi',
@@ -372,7 +372,7 @@ test('unbind suppresses discovery and the next message starts a fresh session', 
     const sessionId = await bot.ensureSession('oc_1', event, 'hi')
     assert.equal(sessionId, 'ses_1')
     assert.equal(listed, false)
-    assert.equal(bot.bindings.source('oc_1'), 'auto')
+    assert.equal(bot.registry.get('oc_1')?.source, 'auto')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
