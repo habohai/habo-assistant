@@ -53,6 +53,7 @@ const BACKOFF_JITTER = 0.2
 
 export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangerousCommand, parseApprovalReply, summarizeCommand } from './src/approval.js'
 export { BindingRegistry } from './src/binding-registry.js'
+export { ChatDirectory } from './src/chat-directory.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
