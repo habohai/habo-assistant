@@ -92,3 +92,23 @@ export function useFeishuConnection(React: typeof ReactNS): ConnectionState {
   }, [React])
   return connection
 }
+
+export interface SessionTitleRow {
+  title?: unknown
+  displayTitle?: unknown
+}
+
+/** One title fallback for both Sidebar pages. */
+export function sessionDisplayTitle(row: SessionTitleRow | undefined, sessionId: string): string {
+  const title = typeof row?.title === 'string' && row.title !== ''
+    ? row.title
+    : typeof row?.displayTitle === 'string' && row.displayTitle !== ''
+      ? row.displayTitle
+      : ''
+  return title !== '' ? title : sessionId.slice(-8)
+}
+
+/** Prefer the resolved Feishu group name, then the raw chat id. */
+export function groupDisplayName(name: string | undefined, chatId: string): string {
+  return name !== undefined && name !== '' ? name : chatId
+}

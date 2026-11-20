@@ -1,6 +1,6 @@
 import type * as ReactNS from 'react'
 import { createSessionInfoPlugin } from './client-session.js'
-import { useFeishuConnection } from './client-shared.js'
+import { sessionDisplayTitle, useFeishuConnection } from './client-shared.js'
 
 declare global {
   namespace JSX {
@@ -296,19 +296,19 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
               <span className="ft-status"><StatusMark status={task.status} /></span>
               <span className="ft-body">
                 <span className="ft-line">
-                  <span className="ft-title">{row.title || row.displayTitle || id.slice(-8)}</span>
+                  <span className="ft-title">{sessionDisplayTitle(row, id)}</span>
                   <span className="ft-time">
                     {task.status === 'idle'
                       ? formatClock(task.updatedAt)
                       : formatDuration(task.startedAt, now)}
                   </span>
                 </span>
-                {task.question !== '' && task.question !== (row.title || row.displayTitle)
+                {task.question !== '' && task.question !== sessionDisplayTitle(row, id)
                   ? <span className="ft-subject">{task.question}</span>
                   : null}
                 <span className="ft-meta">
                   <span className="ft-status-label">{task.status === 'approval' ? t('statusApproval') : task.status === 'running' ? t('statusRunning') : t('statusIdle')}</span>
-                  {task.chatName !== '' && !(row.title || row.displayTitle || '').includes(task.chatName)
+                  {task.chatName !== '' && !sessionDisplayTitle(row, id).includes(task.chatName)
                     ? <><span className="ft-sep">·</span><span>{task.chatName}</span></>
                     : null}
                 </span>

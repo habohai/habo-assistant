@@ -108,7 +108,7 @@ interface ClientLocale {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void
 }
 
-import { FEISHU_API, fetchFeishuApi, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
+import { FEISHU_API, fetchFeishuApi, groupDisplayName, sessionDisplayTitle, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
 
 interface ClientContext {
   locale: ClientLocale
@@ -1031,7 +1031,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               },
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
-                  h('span', { className: 'sa-feishu-name' }, binding.chatName === undefined || binding.chatName === '' ? binding.chatId : binding.chatName),
+                  h('span', { className: 'sa-feishu-name' }, groupDisplayName(binding.chatName, binding.chatId)),
                   h('span', { className: 'sa-feishu-id' }, binding.chatId),
                 ),
                 binding.botMember === false
@@ -1228,7 +1228,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const hasCurrent = sessions.some(session => session.current)
       const title = group === undefined
         ? t('feishu.groupDetail')
-        : group.chatName === undefined || group.chatName === '' ? group.chatId : group.chatName
+        : groupDisplayName(group.chatName, group.chatId)
       const timeOf = (at: number): string => at > 0 ? new Date(at).toLocaleString() : t('feishu.unknownTime')
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
@@ -1371,10 +1371,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           .catch(reason => { setGroupError(reason instanceof Error ? reason.message : String(reason)) })
           .finally(() => { setGroupLoading(false) })
       }
-      const sessionTitleOf = (id: string): string => {
-        const title = sessionsById[id]?.title
-        return typeof title === 'string' && title !== '' ? title : id
-      }
+      const sessionTitleOf = (id: string): string => sessionDisplayTitle(sessionsById[id], id)
 
       const feishuPanel = h(FeishuPanel, {
         sessionId,
