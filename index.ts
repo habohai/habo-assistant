@@ -1534,6 +1534,38 @@ function registerBindingInfoTool(ctx: HostContext, host: BotHost): void {
         description: 'Feishu group chat id (oc_...), usually the 群ID in the prompt header.',
       },
     },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          bindings: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                chatId: { type: 'string' },
+                botId: { type: 'string' },
+                botName: { type: 'string' },
+                sessionId: { type: 'string' },
+                source: { type: 'string' },
+                at: { type: 'number' },
+              },
+              required: ['chatId', 'botId', 'botName', 'sessionId', 'source', 'at'],
+            },
+          },
+        },
+        required: ['chatId', 'bindings'],
+      },
+      render: (_args: unknown, value: { bindings: Array<{ botName: string; sessionId: string }> }) => [{
+        type: 'text',
+        text: value.bindings.length === 0
+          ? 'No Feishu bots are bound to this group.'
+          : value.bindings.map(binding => `${binding.botName} -> ${binding.sessionId}`).join('\n'),
+      }],
+    },
     async execute(args: { chat_id?: unknown }) {
       const chatId = typeof args.chat_id === 'string' ? args.chat_id.trim() : ''
       if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) throw new Error('chat_id must be a Feishu group id (oc_...)')
