@@ -681,11 +681,14 @@ export class FeishuBot {
   /** Sessions that have pointed at one group, newest first, with the active one marked. */
   async groupDetail(chatId: string): Promise<{
     chatId: string
+    chatType: 'group' | 'p2p'
     chatName?: string
     botMember: boolean
     sessions: Array<{ sessionId: string; at: number; source: string; current: boolean }>
   }> {
     const info = await this.cli.chatInfo(chatId)
+    const p2p = this.chats.kind(chatId) === 'p2p'
+    const peer = p2p ? await this.cli.peerName(chatId) : undefined
     const active = new Map<string, { source: string; at: number }>()
     for (const [key, record] of this.registry.entries()) {
       if (key !== chatId && !key.startsWith(`${chatId}::`)) continue
@@ -711,8 +714,9 @@ export class FeishuBot {
     }
     return {
       chatId,
-      ...(info === undefined || info.name === '' ? {} : { chatName: info.name }),
-      botMember: info?.botMember === true || (info === undefined && this.chats.kind(chatId) === 'p2p'),
+      chatType: p2p ? 'p2p' : 'group',
+      ...(info === undefined || info.name === '' ? peer === undefined ? {} : { chatName: peer } : { chatName: info.name }),
+      botMember: info?.botMember === true || p2p,
       sessions: [...merged.values()].sort((left, right) => right.at - left.at),
     }
   }
@@ -1345,6 +1349,7 @@ export class BotHost {
 
   async groupDetail(chatId: string): Promise<{
     chatId: string
+    chatType: 'group' | 'p2p'
     chatName?: string
     botMember: boolean
     bots: Array<{ id: string; name: string; openId?: string; member: boolean; bound: boolean }>
@@ -1353,12 +1358,13 @@ export class BotHost {
     const merged = new Map<string, { sessionId: string; at: number; source: string; current: boolean }>()
     const chatRows = await this.availableChats(false)
     const chatRow = chatRows.find(chat => chat.chatId === chatId)
-    const bots = chatRow?.bots ?? []
     let chatName = ''
+    let chatType: 'group' | 'p2p' = 'group'
     let botMember = false
     const details = await Promise.all(this.bots.map(bot => bot.groupDetail(chatId).catch(() => undefined)))
     for (const detail of details) {
       if (detail === undefined) continue
+      if (detail.chatType === 'p2p') chatType = 'p2p'
       if (chatName === '' && detail.chatName !== undefined) chatName = detail.chatName
       botMember = botMember || detail.botMember
       for (const session of detail.sessions) {
@@ -1367,8 +1373,23 @@ export class BotHost {
         else if (session.current) previous.current = true
       }
     }
+    const bots = chatType === 'p2p'
+      ? this.bots.flatMap(bot => {
+        const bound = bot.registry.entries().some(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+        return bound
+          ? [{
+            id: bot.config.botId,
+            name: bot.config.botName,
+            ...(bot.config.botOpenId === undefined ? {} : { openId: bot.config.botOpenId }),
+            member: true,
+            bound: true,
+          }]
+          : []
+      })
+      : chatRow?.bots ?? []
     return {
       chatId,
+      chatType,
       ...(chatName === '' ? {} : { chatName }),
       botMember,
       bots,

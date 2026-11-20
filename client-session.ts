@@ -1267,9 +1267,12 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       if (!open) return null
       const sessions = [...(group?.sessions ?? [])].sort((left, right) => right.at - left.at)
       const hasCurrent = sessions.some(session => session.current)
+      const isPrivate = group?.chatType === 'p2p'
       const title = group === undefined
         ? t('feishu.groupDetail')
-        : groupDisplayName(group.chatName, group.chatId)
+        : isPrivate
+          ? (group.chatName === undefined || group.chatName === '' ? t('feishu.privateTitle') : t('feishu.privateWith', { name: group.chatName }))
+          : groupDisplayName(group.chatName, group.chatId)
       const timeOf = (at: number): string => at > 0 ? new Date(at).toLocaleString() : t('feishu.unknownTime')
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
@@ -1283,7 +1286,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             h('span', { className: 'sa-dialog-title' }, title),
             h('button', { type: 'button', className: 'sa-dialog-close', 'aria-label': t('feishu.close'), onClick: onClose }, '×'),
           ),
-          h('div', { className: 'sa-dialog-desc' }, group === undefined ? t('feishu.groupDetail') : `${group.chatId}${group.botMember ? '' : ` · ${t('feishu.botMissing')}`}`),
+          h('div', { className: 'sa-dialog-desc' }, group === undefined
+            ? t('feishu.groupDetail')
+            : isPrivate
+              ? t('feishu.privateTitle')
+              : `${group.chatId}${group.botMember ? '' : ` · ${t('feishu.botMissing')}`}`),
           group?.bots === undefined || group.bots.length === 0
             ? null
             : h('div', { className: 'sa-group-bots' },

@@ -126,8 +126,10 @@ export class BindingRegistry {
   private async load(): Promise<void> {
     try {
       const text = await readFile(this.file, 'utf8')
+      let lines = 0
       for (const line of text.split('\n')) {
         if (line.trim() === '') continue
+        lines += 1
         try {
           const record = JSON.parse(line) as BindingRecord
           if (typeof record?.key === 'string' && typeof record?.chatId === 'string' && typeof record?.at === 'number') {
@@ -137,6 +139,7 @@ export class BindingRegistry {
           // A torn tail is ignored; the next append repairs the journal.
         }
       }
+      if (lines > 2_000) await this.compact()
       return
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -264,6 +267,35 @@ export class BindingRegistry {
 
   candidateFor(chatId: string, botId = this.botId): BindingRecord | undefined {
     return this.candidates.get(slot(botId, chatId))
+  }
+
+  /** Rewrite the journal from in-memory state, dropping superseded/torn records. */
+  async compact(): Promise<void> {
+    const records: BindingRecord[] = []
+    const seenActive = new Set<string>()
+    for (const list of this.historyByChat.values()) {
+      for (const record of list) {
+        const active = this.active.get(slot(record.botId, record.key))
+        const state = active !== undefined && active.sessionId === record.sessionId && active.at === record.at ? 'active' : 'replaced'
+        records.push({ ...record, state })
+        if (state === 'active') seenActive.add(slot(record.botId, record.key))
+      }
+    }
+    for (const [key, record] of this.active) {
+      if (!seenActive.has(key)) records.push({ ...record, state: 'active' })
+    }
+    for (const record of this.candidates.values()) records.push(record)
+    for (const key of this.suppressed) {
+      const index = key.indexOf('\u0000')
+      if (index === -1) continue
+      const botId = key.slice(0, index)
+      const chatId = key.slice(index + 1)
+      records.push({ botId, op: 'unbind', key: chatId, chatId, source: 'auto', at: Date.now(), state: 'unbound' })
+    }
+    await mkdir(dirname(this.file), { recursive: true })
+    const temp = `${this.file}.${process.pid}.tmp`
+    await writeFile(temp, records.map(record => JSON.stringify(record)).join('\n') + (records.length === 0 ? '' : '\n'), 'utf8')
+    await rename(temp, this.file)
   }
 
   private async append(record: BindingRecord): Promise<void> {

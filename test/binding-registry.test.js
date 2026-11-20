@@ -73,3 +73,24 @@ test('binding registry isolates the same chat for different bots', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('compaction preserves active, history, candidates, and suppression', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'habo-binding-'))
+  try {
+    const registry = new BindingRegistry(dir)
+    await registry.ready
+    await registry.bind('oc_1', '', 'ses_a', 'manual', 10)
+    await registry.bind('oc_1', '', 'ses_b', 'manual', 20)
+    await registry.recordCandidate('oc_2', 'ses_c', 30)
+    await registry.unbind('oc_3', '', 40)
+    await registry.compact()
+    const reloaded = new BindingRegistry(dir)
+    await reloaded.ready
+    assert.equal(reloaded.resolve('oc_1', '', 'chat').sessionId, 'ses_b')
+    assert.equal(reloaded.resolve('oc_2', '', 'chat').kind, 'candidate')
+    assert.equal(reloaded.resolve('oc_3', '', 'chat').kind, 'unbound')
+    assert.equal(reloaded.listByChat('oc_1')[0].sessionId, 'ses_b')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
