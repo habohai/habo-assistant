@@ -65,6 +65,7 @@ export class LarkCli {
   private readonly chatNames: Map<string, string>
   private chatList: ChatSummary[] | undefined
   private chatListAt: number
+  private readonly peerNames: Map<string, string>
 
   constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
@@ -80,6 +81,7 @@ export class LarkCli {
     this.chatNames = new Map()
     this.chatList = undefined
     this.chatListAt = 0
+    this.peerNames = new Map()
   }
 
   /** Resolve the executable once; a failure clears the cache for the next try. */
@@ -180,6 +182,33 @@ export class LarkCli {
     this.chatList = [...merged.values()]
     this.chatListAt = now
     return this.chatList
+  }
+
+  /** Resolve the human peer name of a p2p chat from its recent messages. */
+  async peerName(chatId: string): Promise<string | undefined> {
+    const cached = this.peerNames.get(chatId)
+    if (cached !== undefined) return cached
+    try {
+      const { stdout } = await this.run([
+        'im', '+chat-messages-list',
+        '--as', 'bot',
+        '--chat-id', chatId,
+        '--order', 'desc',
+        '--page-size', '20',
+        '--json',
+      ])
+      const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ sender?: { sender_type?: unknown; name?: unknown } }> } }
+      for (const message of parsed.data?.messages ?? []) {
+        const sender = message.sender
+        if (sender?.sender_type !== 'user') continue
+        if (typeof sender.name !== 'string' || sender.name.trim() === '') continue
+        this.peerNames.set(chatId, sender.name.trim())
+        return sender.name.trim()
+      }
+    } catch (error) {
+      this.logger?.debug?.(`feishu-bot: cannot resolve peer name for ${chatId}: ${String(error)}`)
+    }
+    return undefined
   }
 
   /** Name plus whether the bot itself is a member. */

@@ -8,6 +8,7 @@ import {
   normalizeConfig,
   readFeishuEvent,
   isStopCommand,
+  privateSessionTitle,
   sessionTitle,
   splitReply,
 } from '../lib/index.js'
@@ -66,6 +67,11 @@ test('readFeishuEvent flattens the CLI event', () => {
   assert.equal(wrapped?.chatId, 'oc_2')
   assert.equal(wrapped?.senderId, 'ou_1')
   assert.deepEqual(wrapped?.mentions, [{ id: 'ou_bot', name: 'bot' }])
+})
+
+test('privateSessionTitle names the peer and bot', () => {
+  assert.equal(privateSessionTitle('海振国', '海振国的智能助手'), '与 海振国 的私聊 · 海振国的智能助手')
+  assert.equal(privateSessionTitle('', 'bot'), '私聊 · bot')
 })
 
 test('acceptEvent filters chats, senders, and types', () => {

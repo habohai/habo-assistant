@@ -22,6 +22,14 @@ export function sessionTitle(event: Pick<FeishuEvent, 'chatId'>, text = '', grou
   return `飞书·${suffix}`
 }
 
+/** Title for a direct chat: peer + bot identity. */
+export function privateSessionTitle(peerName: string, botName: string): string {
+  const peer = peerName.trim()
+  const bot = botName.trim()
+  if (peer === '') return bot === '' ? '私聊' : `私聊 · ${bot}`
+  return bot === '' ? `与 ${peer} 的私聊` : `与 ${peer} 的私聊 · ${bot}`
+}
+
 /**
  * Split a long reply on line boundaries without exceeding `limit` characters.
  * @param {string} text

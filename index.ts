@@ -39,7 +39,7 @@ import { Metrics } from './src/metrics.js'
 import { ChatDirectory } from './src/chat-directory.js'
 import { artifactsProjection } from './src/artifacts-projection.js'
 import { taskProjection } from './src/task-projection.js'
-import { isStopCommand, sessionTitle, splitReply } from './src/text.js'
+import { isStopCommand, privateSessionTitle, sessionTitle, splitReply } from './src/text.js'
 import { KeyedQueue } from './src/work.js'
 
 /** Feishu event key consumed by the bot. */
@@ -59,7 +59,7 @@ export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
 export { LarkCli, parseMessageId } from './src/lark.js'
 export { Metrics, percentile } from './src/metrics.js'
-export { isStopCommand, sessionTitle, splitReply } from './src/text.js'
+export { isStopCommand, privateSessionTitle, sessionTitle, splitReply } from './src/text.js'
 export { KeyedQueue, Semaphore } from './src/work.js'
 export { taskProjection } from './src/task-projection.js'
 export { artifactsProjection } from './src/artifacts-projection.js'
@@ -138,6 +138,7 @@ export class FeishuBot {
   private lastEventAt: number
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
+  private readonly privateTitles: Map<string, string>
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
 
@@ -181,6 +182,7 @@ export class FeishuBot {
     this.lastEventAt = 0
     this.sessionLookup = new Map()
     this.digestCache = new Map()
+    this.privateTitles = new Map()
     this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
 
@@ -1045,6 +1047,17 @@ export class FeishuBot {
     }
   }
 
+  /** Rename an existing p2p Session from its peer + bot identity. */
+  private async refreshPrivateTitle(sessionId: string, chatId: string): Promise<void> {
+    const peer = await this.cli.peerName(chatId)
+    const title = privateSessionTitle(peer ?? '', this.config.botName)
+    if (this.privateTitles.get(sessionId) === title) return
+    this.privateTitles.set(sessionId, title)
+    await this.ctx.sessionController.rename({ sessionId, title }).catch(error => {
+      this.ctx.logger.debug(`feishu-bot: cannot rename private session ${sessionId}: ${String(error)}`)
+    })
+  }
+
   /** Create a new session, optionally seeded with a compact digest, and bind it. */
   private async createSessionForChat(key: string, event: FeishuEvent, text: string, summary = ''): Promise<string> {
     const created = await this.ctx.sessionController.create({
@@ -1061,7 +1074,11 @@ export class FeishuBot {
     this.trackSession(sessionId, event.chatId)
     try {
       const groupName = await this.chatName(event.chatId)
-      await this.ctx.sessionController.rename({ sessionId, title: sessionTitle(event, text, groupName ?? '') })
+      const title = event.chatType === 'p2p'
+        ? privateSessionTitle((await this.cli.peerName(event.chatId)) ?? '', this.config.botName)
+        : sessionTitle(event, text, groupName ?? '')
+      this.privateTitles.set(sessionId, title)
+      await this.ctx.sessionController.rename({ sessionId, title })
     } catch {
       // A title is cosmetic; the binding is what matters.
     }
@@ -1092,6 +1109,10 @@ export class FeishuBot {
       && Date.now() - resolution.at >= this.config.p2pSessionTtlMs) {
       // Direct chats expire after the configured TTL; start a fresh Session.
       return this.createSessionForChat(key, event, text)
+    }
+    if (event.chatType === 'p2p' && known !== undefined
+      && (resolution.kind === 'explicit' || resolution.kind === 'auto')) {
+      void this.refreshPrivateTitle(known, event.chatId)
     }
     if (known !== undefined && resolution.kind === 'explicit') {
       // Explicit/manual binding is authoritative: never discover, digest, or create.
