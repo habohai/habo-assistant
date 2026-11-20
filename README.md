@@ -35,6 +35,7 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 - id: habo-assistant
   name: 'habo-assistant'
   config:
+    larkProfile: cli_xxxxxxxx  # 可选：lark-cli profile，一个 profile = 一个 bot app
     cwd: /Users/me/work/repo
     workspaceId: 00000000-0000-0000-0000-000000000000
     allowChats:

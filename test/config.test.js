@@ -12,6 +12,8 @@ test('normalizeConfig keeps documented defaults', () => {
   assert.equal(config.readyTimeoutMs, 30_000)
   assert.equal(config.progress, true)
   assert.equal(config.workspaceId, undefined)
+  assert.equal(config.larkProfile, undefined)
+  assert.equal(normalizeConfig({ larkProfile: ' bot-a ' }).larkProfile, 'bot-a')
   assert.equal(config.permissionPreset, '')
   assert.equal(normalizeConfig({ workspaceId: 'w1' }).workspaceId, 'w1')
   assert.equal(config.approvalTimeoutMs, 120_000)

@@ -29,6 +29,7 @@ export interface LarkContext {
 
 export interface LarkOptions {
   name?: string
+  profile?: string
   cwd: string
   timeoutMs?: number
   dryRun?: boolean
@@ -53,6 +54,7 @@ export function parseMessageId(stdout: string): string | undefined {
 export class LarkCli {
   private readonly ctx: LarkContext
   private readonly name: string
+  private readonly profile?: string
   private readonly cwd: string
   private readonly timeoutMs: number
   private readonly dryRun: boolean
@@ -64,9 +66,10 @@ export class LarkCli {
   private chatList: ChatSummary[] | undefined
   private chatListAt: number
 
-  constructor(ctx: LarkContext, { name = 'lark-cli', cwd, timeoutMs = 15_000, dryRun = false, logger }: LarkOptions) {
+  constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
     this.name = name
+    this.profile = profile
     this.cwd = cwd
     this.timeoutMs = timeoutMs
     this.dryRun = dryRun
@@ -102,7 +105,7 @@ export class LarkCli {
   async run(args: string[], { timeoutMs = this.timeoutMs }: { timeoutMs?: number } = {}): Promise<{ stdout: string; stderr: string }> {
     const executable = await this.resolve()
     const handle = this.ctx.subprocess.spawn({
-      argv: [executable, ...args],
+      argv: [executable, ...(this.profile === undefined ? [] : ['--profile', this.profile]), ...args],
       cwd: this.cwd,
       stdio: {
         stdin: 'ignore',

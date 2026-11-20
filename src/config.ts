@@ -11,6 +11,8 @@ import { isAbsolute, join } from 'node:path'
 /** Normalized plugin configuration. */
 export interface Config {
   larkCli: string
+  /** lark-cli configuration profile; one profile = one bot app. */
+  larkProfile?: string
   cwd: string
   workspaceId?: string
   allowChats: string[]
@@ -75,6 +77,7 @@ export function normalizeConfig(raw: unknown): Config {
   const chats = list('allowChats')
   return {
     larkCli: string('larkCli', 'lark-cli'),
+    larkProfile: string('larkProfile') || undefined,
     cwd: string('cwd'),
     /** Existing DSH workspace to attach new sessions to; cwd is then only the CLI directory. */
     workspaceId: string('workspaceId') || undefined,

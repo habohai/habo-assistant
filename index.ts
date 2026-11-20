@@ -144,6 +144,7 @@ export class FeishuBot {
     this.metrics = new Metrics()
     this.cli = new LarkCli(ctx, {
       name: config.larkCli,
+      ...(config.larkProfile === undefined ? {} : { profile: config.larkProfile }),
       cwd: config.cwd,
       timeoutMs: config.cliTimeoutMs,
       dryRun: config.dryRun,
@@ -241,7 +242,7 @@ export class FeishuBot {
     let handle
     try {
       handle = this.ctx.subprocess.spawn({
-        argv: [executable, 'event', 'consume', EVENT_KEY, '--as', 'bot'],
+        argv: [executable, ...(this.config.larkProfile === undefined ? [] : ['--profile', this.config.larkProfile]), 'event', 'consume', EVENT_KEY, '--as', 'bot'],
         cwd: this.config.cwd,
         stdio: {
           stdin: 'pipe',
