@@ -140,6 +140,7 @@ export class FeishuBot {
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
   private readonly privateTitles: Map<string, string>
+  private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
@@ -186,6 +187,7 @@ export class FeishuBot {
     this.sessionLookup = new Map()
     this.digestCache = new Map()
     this.privateTitles = new Map()
+    this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
     this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
@@ -1059,6 +1061,7 @@ export class FeishuBot {
 
   /** Rename an existing p2p Session from its peer + bot identity. */
   private async refreshPrivateTitle(sessionId: string, chatId: string): Promise<void> {
+    if (this.manualPrivateTitles.has(sessionId)) return
     const peer = await this.cli.peerName(chatId)
     const title = privateSessionTitle(peer ?? '', this.config.botName)
     if (this.privateTitles.get(sessionId) === title) return
@@ -1222,6 +1225,11 @@ export class FeishuBot {
   }
 
   onSessionEvent(session: SessionLike, event: SessionEventLike): void {
+    if (event.type === 'session/title' && typeof event.data?.title === 'string') {
+      const auto = this.privateTitles.get(session.id)
+      if (auto !== undefined && event.data.title !== auto) this.manualPrivateTitles.add(session.id)
+      else if (auto !== undefined) this.manualPrivateTitles.delete(session.id)
+    }
     this.observeOutboundChat(session.id, event)
     const pending = this.pending.get(session.id)
     if (pending === undefined) return

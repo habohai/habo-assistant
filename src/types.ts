@@ -88,6 +88,7 @@ export interface SessionEventLike {
   type: string
   time?: number
   data: {
+    title?: string
     name?: string
     arguments?: unknown
     turn?: number
