@@ -299,7 +299,7 @@ export class LarkCli {
           '--chat-id', chatId,
           '--as', identity,
           '--order', 'desc',
-          '--page-size', '20',
+          '--page-size', '50',
           '--no-reactions',
           '--json',
         ])
