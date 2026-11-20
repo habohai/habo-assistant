@@ -25,12 +25,21 @@ export interface FeishuBinding {
   boundAt?: number
 }
 
+export interface FeishuChatBot {
+  id: string
+  name: string
+  openId?: string
+  member: boolean
+  bound: boolean
+}
+
 export interface FeishuChat {
   chatId: string
   name: string
   botMember?: boolean
   allowed: boolean
   bound: boolean
+  bots?: FeishuChatBot[]
 }
 
 export interface FeishuSessionBinding {
@@ -44,6 +53,7 @@ export interface FeishuGroupDetail {
   chatId: string
   chatName?: string
   botMember: boolean
+  bots?: FeishuChatBot[]
   sessions: FeishuSessionBinding[]
 }
 

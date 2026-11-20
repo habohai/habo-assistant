@@ -962,13 +962,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     function FeishuPanel({ sessionId, status, loading, error, actionError, onBind, onOpenGroup, onUnbind, onReload, t }: FeishuPanelProps) {
       const bound = (status?.bindings ?? []).filter(binding => binding.sessionId === sessionId)
       const botById = new Map((status?.bots ?? []).map(bot => [bot.id, bot.name]))
-      const botNames = [...new Set((status?.bots ?? []).map(bot => bot.name).filter(name => name !== ''))]
-      const bot = status?.bot
-      const botLabel = botNames.length > 0
-        ? botNames.join(' / ')
-        : bot === undefined
-          ? ''
-          : [bot.name, bot.openId].filter(value => typeof value === 'string' && value !== '').join(' · ')
+      const boundBotIds = [...new Set(bound.map(binding => binding.botId).filter((id): id is string => id !== undefined))]
+      const botLabel = boundBotIds.map(id => botById.get(id) ?? id).join(' / ')
       const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
       return h('section', { className: 'sa-feishu' },
         h('div', { className: 'sa-feishu-head' },
@@ -1080,9 +1075,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         || chat.name.toLowerCase().includes(needle)
         || chat.chatId.toLowerCase().includes(needle))
       const target = manual.trim() !== '' ? manual.trim() : selected
+      const selectedChat = chats.find(chat => chat.chatId === selected)
+      const availableBots = selectedChat?.bots?.filter(bot => bot.member) ?? bots
       const choose = (chatId: string): void => {
         setSelected(chatId)
         setManual('')
+        const chat = chats.find(item => item.chatId === chatId)
+        const memberBots = chat?.bots?.filter(bot => bot.member) ?? []
+        if (memberBots.length > 0 && !memberBots.some(bot => bot.id === botId)) onBotChange(memberBots[0].id)
       }
       const submit = (): void => {
         if (target !== '' && !busy) onBind(target)
@@ -1101,14 +1101,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           ),
           h('div', { className: 'sa-dialog-desc' }, t('feishu.bindHint')),
           h('div', { className: 'sa-dialog-body' },
-            bots.length > 1
+            availableBots.length > 1
               ? h('label', { className: 'sa-bot-picker' },
                 h('span', null, t('feishu.botLabel')),
                 h('select', {
                   className: 'sa-input',
                   value: botId,
                   onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
-                }, bots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
+                }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
               )
               : null,
             h('input', {
@@ -1187,7 +1187,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               type: 'button',
               className: 'sa-button',
               'data-primary': 'true',
-              disabled: busy || target === '',
+              disabled: busy || target === '' || (selectedChat !== undefined && selectedChat.bots !== undefined && availableBots.length === 0),
               onClick: submit,
             }, t('feishu.bindAction')),
           ),
@@ -1237,6 +1237,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             h('button', { type: 'button', className: 'sa-dialog-close', 'aria-label': t('feishu.close'), onClick: onClose }, '×'),
           ),
           h('div', { className: 'sa-dialog-desc' }, group === undefined ? t('feishu.groupDetail') : `${group.chatId}${group.botMember ? '' : ` · ${t('feishu.botMissing')}`}`),
+          group?.bots === undefined || group.bots.length === 0
+            ? null
+            : h('div', { className: 'sa-dialog-desc' },
+              `${t('feishu.botLabel')}: ${group.bots.filter(bot => bot.member).map(bot => `${bot.name}${bot.bound ? ' ✓' : ''}`).join(' / ')}`),
           h('div', { className: 'sa-dialog-body' },
             loading
               ? h('div', { className: 'sa-dialog-empty' }, t('feishu.loading'))

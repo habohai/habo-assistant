@@ -1264,28 +1264,47 @@ export class BotHost {
     return { ...this.status(), bindings: await this.bindingSummaries(force) }
   }
 
-  async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>> {
+  async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean; bots: Array<{ id: string; name: string; openId?: string; member: boolean; bound: boolean }> }>> {
     const merged = new Map<string, { chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>()
-    for (const chat of (await Promise.all(this.bots.map(bot => bot.availableChats(force)))).flat()) {
-      const previous = merged.get(chat.chatId)
-      if (previous === undefined) merged.set(chat.chatId, { ...chat })
-      else {
-        previous.botMember = previous.botMember || chat.botMember
-        previous.allowed = previous.allowed || chat.allowed
-        previous.bound = previous.bound || chat.bound
-        if (previous.name === '') previous.name = chat.name
+    const memberships = new Map<string, Map<string, boolean>>()
+    for (const bot of this.bots) {
+      for (const chat of await bot.availableChats(force)) {
+        const previous = merged.get(chat.chatId)
+        if (previous === undefined) merged.set(chat.chatId, { ...chat })
+        else {
+          previous.botMember = previous.botMember || chat.botMember
+          previous.allowed = previous.allowed || chat.allowed
+          previous.bound = previous.bound || chat.bound
+          if (previous.name === '') previous.name = chat.name
+        }
+        const map = memberships.get(chat.chatId) ?? new Map<string, boolean>()
+        map.set(bot.config.botId, chat.botMember)
+        memberships.set(chat.chatId, map)
       }
     }
-    return [...merged.values()]
+    return [...merged.values()].map(chat => {
+      const bots = this.bots.map(bot => ({
+        id: bot.config.botId,
+        name: bot.config.botName,
+        ...(bot.config.botOpenId === undefined ? {} : { openId: bot.config.botOpenId }),
+        member: this.bots.length === 1 ? chat.botMember : memberships.get(chat.chatId)?.get(bot.config.botId) === true,
+        bound: bot.registry.entries().some(([key]) => key === chat.chatId || key.startsWith(`${chat.chatId}::`)),
+      }))
+      return { ...chat, botMember: bots.some(bot => bot.member), bound: bots.some(bot => bot.bound), bots }
+    })
   }
 
   async groupDetail(chatId: string): Promise<{
     chatId: string
     chatName?: string
     botMember: boolean
+    bots: Array<{ id: string; name: string; openId?: string; member: boolean; bound: boolean }>
     sessions: Array<{ sessionId: string; at: number; source: string; current: boolean }>
   }> {
     const merged = new Map<string, { sessionId: string; at: number; source: string; current: boolean }>()
+    const chatRows = await this.availableChats(false)
+    const chatRow = chatRows.find(chat => chat.chatId === chatId)
+    const bots = chatRow?.bots ?? []
     let chatName = ''
     let botMember = false
     for (const bot of this.bots) {
@@ -1306,6 +1325,7 @@ export class BotHost {
       chatId,
       ...(chatName === '' ? {} : { chatName }),
       botMember,
+      bots,
       sessions: [...merged.values()].sort((left, right) => right.at - left.at),
     }
   }
