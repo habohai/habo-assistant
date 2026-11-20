@@ -22,6 +22,7 @@ test('binding registry migrates active, history, candidates, and suppression', a
     await registry.ready
     assert.deepEqual(registry.resolve('oc_1', '', 'chat'), { kind: 'explicit', sessionId: 'ses_active', source: 'manual', at: 10, key: 'oc_1' })
     assert.equal(registry.listByChat('oc_1')[0].sessionId, 'ses_active')
+    assert.equal(registry.listByChat('oc_1')[0].botId, 'default')
     assert.equal(registry.resolve('oc_2', '', 'chat').kind, 'candidate')
     assert.equal(registry.resolve('oc_2', '', 'chat').sessionId, 'ses_candidate')
     assert.equal(registry.resolve('oc_3', '', 'chat').kind, 'unbound')

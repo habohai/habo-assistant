@@ -50,7 +50,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 - 首次加载会把旧的 `bindings.json` / `binding-history.json` / `chat-affinity.json` / `suppressed-chats.json` 自动迁移；
 - 旧文件保留但不删除，作为回滚/审计依据；
-- 绑定、历史、出站亲和、解绑抑制都从同一份 journal 推导，不再各写一个文件。
+- 绑定、历史、出站亲和、解绑抑制都从同一份 journal 推导，不再各写一个文件；
+- 每条记录带 `botId`（当前取 `botOpenId`/`botName`），为未来多 bot 预留；运行时目前仍是单 bot。
 
 去重日志仍在 `seen.jsonl`，群白名单位于 `dynamic-chats.json`。
 

@@ -13,6 +13,7 @@ export type BindingSource = 'external' | 'manual' | 'auto'
 export type BindingState = 'active' | 'replaced' | 'unbound' | 'candidate'
 
 export interface BindingRecord {
+  botId: string
   op: 'bind' | 'unbind' | 'candidate'
   key: string
   chatId: string
@@ -50,6 +51,7 @@ function isSource(value: unknown): value is BindingSource {
 export class BindingRegistry {
   private readonly file: string
   private readonly legacyDir: string
+  private readonly botId: string
   /** key -> active bind record. */
   private readonly active: Map<string, BindingRecord>
   /** chatId -> candidate from an outbound bot message. */
@@ -59,8 +61,9 @@ export class BindingRegistry {
   private readonly suppressed: Set<string>
   readonly ready: Promise<void>
 
-  constructor(dir: string) {
+  constructor(dir: string, botId = 'default') {
     this.legacyDir = dir
+    this.botId = botId
     this.file = join(dir, 'binding-state.v2.jsonl')
     this.active = new Map()
     this.candidates = new Map()
@@ -121,7 +124,7 @@ export class BindingRegistry {
         try {
           const record = JSON.parse(line) as BindingRecord
           if (typeof record?.key === 'string' && typeof record?.chatId === 'string' && typeof record?.at === 'number') {
-            this.apply(record)
+            this.apply({ ...record, botId: typeof record.botId === 'string' ? record.botId : this.botId })
           }
         } catch {
           // A torn tail is ignored; the next append repairs the journal.
@@ -143,14 +146,14 @@ export class BindingRegistry {
       for (const [key, value] of Object.entries(active)) {
         const { chatId, threadId } = parseKey(key)
         if (typeof value === 'string' && value !== '') {
-          legacy.push({ op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId: value, source: 'manual', at: 0, state: 'active' })
+          legacy.push({ botId: this.botId, op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId: value, source: 'manual', at: 0, state: 'active' })
           continue
         }
         if (value === null || typeof value !== 'object') continue
         const record = value as { sessionId?: unknown; source?: unknown; boundAt?: unknown }
         if (typeof record.sessionId !== 'string' || record.sessionId === '') continue
         legacy.push({
-          op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }),
+          botId: this.botId, op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }),
           sessionId: record.sessionId,
           source: isSource(record.source) ? record.source : 'auto',
           at: typeof record.boundAt === 'number' ? record.boundAt : 0,
@@ -168,7 +171,7 @@ export class BindingRegistry {
           const record = item as { sessionId?: unknown; at?: unknown; source?: unknown }
           if (typeof record.sessionId !== 'string' || record.sessionId === '') continue
           legacy.push({
-            op: 'bind', key: chatId, chatId, sessionId: record.sessionId,
+            botId: this.botId, op: 'bind', key: chatId, chatId, sessionId: record.sessionId,
             source: isSource(record.source) ? record.source : 'auto',
             at: typeof record.at === 'number' ? record.at : 0,
             state: 'replaced',
@@ -184,7 +187,7 @@ export class BindingRegistry {
         const record = value as { sessionId?: unknown; at?: unknown }
         if (typeof record.sessionId !== 'string') continue
         legacy.push({
-          op: 'candidate', key: chatId, chatId, sessionId: record.sessionId,
+          botId: this.botId, op: 'candidate', key: chatId, chatId, sessionId: record.sessionId,
           source: 'auto', at: typeof record.at === 'number' ? record.at : 0, state: 'candidate',
         })
       }
@@ -196,7 +199,7 @@ export class BindingRegistry {
       const list = JSON.parse(await readFile(join(this.legacyDir, 'suppressed-chats.json'), 'utf8')) as unknown
       if (Array.isArray(list)) {
         for (const chatId of list) {
-          if (typeof chatId === 'string') legacy.push({ op: 'unbind', key: chatId, chatId, source: 'auto', at: 0, state: 'unbound' })
+          if (typeof chatId === 'string') legacy.push({ botId: this.botId, op: 'unbind', key: chatId, chatId, source: 'auto', at: 0, state: 'unbound' })
         }
       }
     } catch (error) {
@@ -263,7 +266,7 @@ export class BindingRegistry {
   async bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now()): Promise<BindingRecord> {
     const key = makeKey(chatId, threadId)
     const record: BindingRecord = {
-      op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId, source, at, state: 'active',
+      botId: this.botId, op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId, source, at, state: 'active',
     }
     this.apply(record)
     await this.append(record)
@@ -272,14 +275,14 @@ export class BindingRegistry {
 
   async unbind(chatId: string, threadId: string, at = Date.now()): Promise<void> {
     const key = makeKey(chatId, threadId)
-    const record: BindingRecord = { op: 'unbind', key, chatId, ...(threadId === '' ? {} : { threadId }), source: 'auto', at, state: 'unbound' }
+    const record: BindingRecord = { botId: this.botId, op: 'unbind', key, chatId, ...(threadId === '' ? {} : { threadId }), source: 'auto', at, state: 'unbound' }
     this.apply(record)
     await this.append(record)
     this.active.delete(key)
   }
 
   async recordCandidate(chatId: string, sessionId: string, at = Date.now()): Promise<void> {
-    const record: BindingRecord = { op: 'candidate', key: chatId, chatId, sessionId, source: 'auto', at, state: 'candidate' }
+    const record: BindingRecord = { botId: this.botId, op: 'candidate', key: chatId, chatId, sessionId, source: 'auto', at, state: 'candidate' }
     this.apply(record)
     await this.append(record)
   }
@@ -295,7 +298,7 @@ export class BindingRegistry {
     for (const record of this.historyByChat.values()) records.push(...record)
     for (const record of this.active.values()) records.push(record)
     for (const record of this.candidates.values()) records.push(record)
-    for (const chatId of this.suppressed) records.push({ op: 'unbind', key: chatId, chatId, source: 'auto', at: Date.now(), state: 'unbound' })
+    for (const chatId of this.suppressed) records.push({ botId: this.botId, op: 'unbind', key: chatId, chatId, source: 'auto', at: Date.now(), state: 'unbound' })
     const temp = `${this.file}.${process.pid}.tmp`
     await writeFile(temp, records.map(record => JSON.stringify(record)).join('\n') + (records.length === 0 ? '' : '\n'), 'utf8')
     await rename(temp, this.file)

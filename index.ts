@@ -138,7 +138,7 @@ export class FeishuBot {
     this.ctx = ctx
     this.config = config
     this.routing = config.routing
-    this.registry = new BindingRegistry(config.stateDir)
+    this.registry = new BindingRegistry(config.stateDir, config.botOpenId ?? config.botName ?? 'default')
     this.seen = new SeenStore(join(config.stateDir, 'seen.jsonl'), { logger: ctx.logger })
     this.metrics = new Metrics()
     this.cli = new LarkCli(ctx, {
@@ -597,6 +597,7 @@ export class FeishuBot {
       const info = byId.get(chatId)
       return [{
         chatId,
+        botId: record.botId,
         sessionId: record.sessionId,
         source: record.source,
         boundAt: record.at,
