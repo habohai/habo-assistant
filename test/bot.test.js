@@ -523,3 +523,30 @@ test('manual binding can target one topic without touching the group main conver
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('pre-send gate claims a group and denies an owner outside it', async () => {
+  const { bot, stateDir } = await createBot({}, { ownerUnionId: 'on_owner' })
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.cli.chatMemberUnionIds = async () => new Set(['on_other'])
+    const denied = await bot.outboundGate({
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'lark-cli im +messages-send --as bot --chat-id oc_1 --text hi' }),
+      agent: { session: { id: 'ses_sender' } },
+    })
+    assert.equal(denied.kind, 'deny')
+    assert.equal(bot.registry.get('oc_1'), undefined)
+    bot.cli.chatMemberUnionIds = async () => new Set(['on_owner'])
+    const allowed = await bot.outboundGate({
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'lark-cli im +messages-send --as bot --chat-id oc_1 --text hi' }),
+      agent: { session: { id: 'ses_sender' } },
+    })
+    assert.equal(allowed.kind, 'allow')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_sender')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

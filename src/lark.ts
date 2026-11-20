@@ -229,6 +229,30 @@ export class LarkCli {
     return chats.find(chat => chat.chatId === chatId)?.name ?? this.chatNames.get(chatId)
   }
 
+  /** Recent topics visible in a chat, keyed by omt_ thread id. */
+  async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
+    const { stdout } = await this.run([
+      'im', '+chat-messages-list',
+      '--chat-id', chatId,
+      '--as', 'bot',
+      '--order', 'desc',
+      '--page-size', '50',
+      '--no-reactions',
+      '--json',
+    ])
+    const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ thread_id?: unknown; content?: unknown; create_time?: unknown }> } }
+    const topics = new Map<string, { threadId: string; title: string; updatedAt: number }>()
+    for (const message of parsed.data?.messages ?? []) {
+      if (typeof message.thread_id !== 'string' || !message.thread_id.startsWith('omt_')) continue
+      if (topics.has(message.thread_id)) continue
+      const raw = typeof message.content === 'string' ? message.content : ''
+      const title = raw.replace(/@_user_\d+/g, ' ').replace(/[#*`>\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30)
+      const updatedAt = typeof message.create_time === 'string' ? Date.parse(message.create_time.replace(' ', 'T')) || 0 : 0
+      topics.set(message.thread_id, { threadId: message.thread_id, title: title === '' ? '话题' : title, updatedAt })
+    }
+    return [...topics.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+  }
+
   /** Resolve the chat/topic context of one message (used for reply-to-topic claims). */
   async messageContext(messageId: string): Promise<{ chatId: string; threadId: string } | undefined> {
     let lastError: unknown

@@ -218,6 +218,7 @@ export class FeishuBot {
       this.trackSession(record.sessionId, key.split('::')[0])
     }
     this.installApprovalGate()
+    this.installOutboundGate()
     this.ctx.on('session/event', (session, event) => {
       this.onSessionEvent(session, event)
     })
@@ -579,23 +580,83 @@ export class FeishuBot {
     return true
   }
 
-  /** Remember sessions that sent a bot message to a group through lark-cli. */
-  private observeOutboundChat(sessionId: string, event: SessionEventLike): void {
-    if (event.type !== 'tool/call') return
-    if (event.data?.name !== 'bash' && event.data?.name !== 'pwsh') return
-    const raw = event.data.arguments
-    let command = ''
+  private bashCommand(exec: { name?: unknown; arguments?: unknown } | undefined): string {
+    if (exec?.name !== 'bash' && exec?.name !== 'pwsh') return ''
+    const raw = exec.arguments
     if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw) as { command?: unknown }
-        if (typeof parsed.command === 'string') command = parsed.command
+        return typeof parsed.command === 'string' ? parsed.command : ''
       } catch {
-        return
+        return ''
       }
-    } else if (raw !== null && typeof raw === 'object') {
-      const value = raw as { command?: unknown }
-      if (typeof value.command === 'string') command = value.command
     }
+    if (raw !== null && typeof raw === 'object') {
+      const value = raw as { command?: unknown }
+      return typeof value.command === 'string' ? value.command : ''
+    }
+    return ''
+  }
+
+  /** Gate lark-cli sends before dispatch: validate and claim the conversation first. */
+  installOutboundGate(): void {
+    this.ctx.on('tools/pre-execute', (exec: unknown) => this.outboundGate(exec) as Promise<any>, { prepend: true })
+  }
+
+  private async outboundGate(exec: unknown): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string } | undefined> {
+    const call = exec as { name?: unknown; arguments?: unknown; agent?: { session?: { id?: unknown } } } | undefined
+    const command = this.bashCommand(call)
+    if (command === '' || !command.includes('lark-cli')) return undefined
+    if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return undefined
+    const profile = /(?:^|\s)--profile(?:\s+|=)([^\s]+)/.exec(command)?.[1]
+    if (profile !== undefined) {
+      if (profile !== this.config.larkProfile) return undefined
+    } else if (!this.isPrimary) {
+      return undefined
+    }
+    const sessionId = call?.agent?.session?.id
+    if (typeof sessionId !== 'string' || sessionId === '') return undefined
+    if (command.includes('+messages-send')) {
+      const chatId = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (chatId === undefined) return undefined
+      return this.gateOutbound(chatId, '', sessionId)
+    }
+    if (command.includes('+messages-reply') && /(?:^|\s)--reply-in-thread\b/.test(command)) {
+      const messageId = /--message-id(?:\s+|=)(om_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (messageId === undefined) return undefined
+      const context = await this.cli.messageContext(messageId).catch(() => undefined)
+      if (context === undefined || context.threadId === '') return undefined
+      return this.gateOutbound(context.chatId, context.threadId, sessionId)
+    }
+    return undefined
+  }
+
+  private async gateOutbound(chatId: string, threadId: string, sessionId: string): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string }> {
+    try {
+      const info = await this.cli.chatInfo(chatId)
+      if (info?.botMember !== true) return { kind: 'allow' }
+      if (this.config.ownerUnionId !== undefined && this.config.ownerUnionId !== '') {
+        try {
+          const members = await this.cli.chatMemberUnionIds(chatId)
+          if (!members.has(this.config.ownerUnionId)) {
+            return { kind: 'deny', reason: `owner is not a member of Feishu group ${chatId}` }
+          }
+        } catch (error) {
+          this.ctx.logger.warn(`feishu-bot: cannot verify owner membership in ${chatId}: ${String(error)}`)
+        }
+      }
+      await this.claimOutbound(chatId, threadId, sessionId, Date.now())
+      return { kind: 'allow' }
+    } catch (error) {
+      this.ctx.logger.warn(`feishu-bot: outbound gate skipped for ${chatId}: ${String(error)}`)
+      return { kind: 'allow' }
+    }
+  }
+
+  /** Remember sessions that sent a bot message to a group through lark-cli. */
+  private observeOutboundChat(sessionId: string, event: SessionEventLike): void {
+    if (event.type !== 'tool/call') return
+    const command = this.bashCommand(event.data)
     if (command === '' || !command.includes('lark-cli')) return
     const profile = /(?:^|\s)--profile(?:\s+|=)([^\s]+)/.exec(command)?.[1]
     if (profile !== undefined) {
@@ -711,6 +772,11 @@ export class FeishuBot {
       }]
     }))
     return summaries.flat()
+  }
+
+  /** Topics visible in one chat, for manual topic binding. */
+  async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
+    return this.cli.listTopics(chatId)
   }
 
   /** Every chat the bot can see, annotated with allowlist/binding state. */
@@ -1526,6 +1592,10 @@ export class BotHost {
       })
   }
 
+  async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
+    return this.primary.listTopics(chatId)
+  }
+
   async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
@@ -1802,6 +1872,15 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
     }
     if (url.searchParams.get('action') === 'chats') {
       sendJson(res, 200, { ok: true, value: { chats: await bot.availableChats(refresh) } })
+      return
+    }
+    if (url.searchParams.get('action') === 'topics') {
+      const chatId = url.searchParams.get('chatId') ?? ''
+      if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) {
+        sendJson(res, 400, { ok: false, error: 'chatId must be a Feishu group id (oc_...)' })
+        return
+      }
+      sendJson(res, 200, { ok: true, value: { topics: await bot.listTopics(chatId) } })
       return
     }
     if (url.searchParams.get('action') === 'group') {

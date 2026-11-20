@@ -15,6 +15,12 @@ export interface ApiEnvelope<T> {
   error?: string
 }
 
+export interface FeishuTopic {
+  threadId: string
+  title: string
+  updatedAt: number
+}
+
 export interface FeishuBinding {
   chatId: string
   chatType?: 'group' | 'p2p'

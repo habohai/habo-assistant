@@ -108,7 +108,7 @@ interface ClientLocale {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void
 }
 
-import { FEISHU_API, fetchFeishuApi, groupDisplayName, sessionDisplayTitle, useFeishuStatus, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
+import { FEISHU_API, fetchFeishuApi, groupDisplayName, sessionDisplayTitle, useFeishuStatus, type FeishuBinding, type FeishuChat, type FeishuTopic, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
 
 interface ClientContext {
   locale: ClientLocale
@@ -250,6 +250,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.artifacts': '会话产物',
       'feishu.chatCount': '{count} 个群',
       'feishu.topicLabel': '话题',
+      'feishu.topicMain': '群主会话',
+      'feishu.topicLoading': '正在读取话题…',
       'feishu.groupHint': '查看绑定的会话',
       'feishu.groupDetail': '群绑定详情',
       'feishu.sessions': '已绑定的会话',
@@ -336,6 +338,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.artifacts': 'Session artifacts',
       'feishu.chatCount': '{count} groups',
       'feishu.topicLabel': 'Topic',
+      'feishu.topicMain': 'Main conversation',
+      'feishu.topicLoading': 'Reading topics…',
       'feishu.groupHint': 'View bound sessions',
       'feishu.groupDetail': 'Group bindings',
       'feishu.sessions': 'Bound sessions',
@@ -1092,7 +1096,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       busy: boolean
       onClose: () => void
       onRefresh: () => void
-      onBind: (chatId: string, botId?: string) => void
+      onBind: (chatId: string, botId?: string, threadId?: string) => void
       t: TFunction
     }
 
@@ -1102,14 +1106,31 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const [selected, setSelected] = useState('')
       const [manual, setManual] = useState('')
       const [manualOpen, setManualOpen] = useState(false)
+      const [threadId, setThreadId] = useState('')
+      const [topics, setTopics] = useState<FeishuTopic[]>([])
+      const [topicsLoading, setTopicsLoading] = useState(false)
       useEffect(() => {
         if (!open) {
           setQuery('')
           setSelected('')
           setManual('')
           setManualOpen(false)
+          setThreadId('')
+          setTopics([])
         }
       }, [open])
+      useEffect(() => {
+        setThreadId('')
+        setTopics([])
+        if (!open || selected === '') return undefined
+        let alive = true
+        setTopicsLoading(true)
+        fetchFeishuApi<{ topics: FeishuTopic[] }>(`${FEISHU_API}?action=topics&chatId=${encodeURIComponent(selected)}`)
+          .then(value => { if (alive) setTopics(value.topics) })
+          .catch(() => { if (alive) setTopics([]) })
+          .finally(() => { if (alive) setTopicsLoading(false) })
+        return () => { alive = false }
+      }, [open, selected])
       useEffect(() => {
         if (open && !loading && chats.length === 0) setManualOpen(true)
       }, [open, loading, chats.length])
@@ -1132,12 +1153,13 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const choose = (chatId: string): void => {
         setSelected(chatId)
         setManual('')
+        setThreadId('')
         const chat = chats.find(item => item.chatId === chatId)
         const memberBots = chat?.bots?.filter(bot => bot.member) ?? []
         if (memberBots.length > 0 && !memberBots.some(bot => bot.id === botId)) onBotChange(memberBots[0].id)
       }
       const submit = (): void => {
-        if (target !== '' && !busy) onBind(target, selectedChat === undefined ? '' : botId)
+        if (target !== '' && !busy) onBind(target, selectedChat === undefined ? '' : botId, manual.trim() === '' ? threadId : '')
       }
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
@@ -1200,6 +1222,20 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
                 }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
               ),
+            selectedChat === undefined || topics.length === 0
+              ? null
+              : h('label', { className: 'sa-bot-picker' },
+                h('span', null, t('feishu.topicLabel')),
+                h('select', {
+                  className: 'sa-input',
+                  value: threadId,
+                  onChange: (event: { target: { value: string } }) => { setThreadId(event.target.value) },
+                },
+                  h('option', { value: '' }, t('feishu.topicMain')),
+                  topics.map(topic => h('option', { key: topic.threadId, value: topic.threadId }, topic.title)),
+                ),
+              ),
+            topicsLoading ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicLoading')) : null,
             h('button', {
               type: 'button',
               className: 'sa-manual-toggle',
@@ -1404,14 +1440,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         setBindOpen(true)
         loadChats()
       }
-      const bindChatToSession = (chatId: string, requestedBotId?: string): void => {
+      const bindChatToSession = (chatId: string, requestedBotId?: string, requestedThreadId = ''): void => {
         if (chatId === '' || binding) return
         setBinding(true)
         setActionError('')
         fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'bind', chatId, sessionId, botId: requestedBotId ?? botId }),
+          body: JSON.stringify({ action: 'bind', chatId, sessionId, threadId: requestedThreadId, botId: requestedBotId ?? botId }),
         })
           .then(() => {
             setBindOpen(false)

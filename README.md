@@ -72,7 +72,9 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 `ownerUnionId` 用于发消息认领时校验 owner 是否在群内；群成员接口无权限时会降级为“bot 在群”的校验并记录 warning。
 
-新话题默认从群主会话注入最近几轮摘要（`topicContext: summary`）；设为 `none` 则从空上下文开始。`feishu_bind_chat` 和绑定 API 支持可选 `thread_id`（`omt_...`）手动绑定具体话题。
+发送前 gate 已接入 `tools/pre-execute`：`lark-cli` 的群发/话题回复会先校验并认领，未授权直接 deny，不会先发出去。
+
+新话题默认从群主会话注入最近几轮摘要（`topicContext: summary`）；设为 `none` 则从空上下文开始。`feishu_bind_chat` 和绑定 API 支持可选 `thread_id`（`omt_...`）手动绑定具体话题；会话信息页的绑定弹窗在选群后会列出群主会话和已有话题。
 
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。
 
