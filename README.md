@@ -20,7 +20,7 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 - 群里 @ 一次，之后这个群或话题的对话就进入同一个 Session；
 - 话题可以独立成 Session，也可以继承群主会话的摘要；
 - 一个 Session 可以绑定多个群/话题，一个群/话题同一时间只属于一个 Session；
-- 在 Session 里让 agent 往群里发消息，会自动认领这个群/话题，后续回复回到当前 Session；
+- 在 Session 里让 agent **读群消息、发消息或回复**，都会自动认领这个群/话题，后续回复回到当前 Session；
 - 多个飞书机器人共享一套绑定，但每个 bot 独立连接、独立审批；
 - 右侧栏提供「任务」和「会话信息」两个页面，随时看进度、绑定和产物。
 
@@ -31,10 +31,13 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 | 群 / 话题绑定 | `(chatId, threadId)` 唯一 Conversation；群主会话和话题互不串 |
 | 话题路由 | `routing: topic` 时，带 `thread_id` 的消息进入独立 Session，回复自动留在话题内 |
 | 多机器人 | 每个 bot 独立 lark-cli profile / consumer / 审批；共享绑定，bot 按需授权 |
+| 读消息认领 | 从 Session 读取群/话题消息后，该 Conversation 自动绑定到当前 Session |
 | 发消息认领 | 从 Session 发往群/话题后，该 Conversation 自动绑定到当前 Session |
 | 发送前校验 | `lark-cli` 群发/话题回复先校验 owner 和 bot，再认领；未授权直接拒绝 |
+| 话题选择 | 绑定弹窗选中群后，可直接选群主会话或该群的已有话题 |
 | 命令审批 | 群里回复「同意 / 拒绝」即可处理审批，审批提示和结果留在原话题 |
-| 会话信息 | 当前 Session 绑定的群/话题、bot 列表、绑定历史、会话产物 |
+| 会话信息 | 当前 Session 绑定的群/话题、bot 列表、行内解绑、会话产物 |
+| 实时刷新 | 绑定或连接变化通过 SSE 推送，页面不需要手动刷新，也不轮询 |
 | 任务看板 | 进行中、待审批、已完成任务；点击直接跳到对应 Session |
 | 会话产物 | 本地文件、飞书文档 / 表格 / 幻灯片 / 画板等统一收集 |
 
@@ -54,7 +57,7 @@ flowchart LR
 - **Conversation**：`chatId + threadId`，`threadId=''` 是群主会话；
 - **Binding**：一个 Conversation 只绑定一个 Session；
 - **BotGrant**：bot 是 Conversation 内的懒授权身份，实际用到才授予；
-- **Session**：可以绑定多个 Conversation；群聊和私聊共用 Session 机制。
+- **Session**：可以绑定多个 Conversation；群聊和私聊共用 Session 机制；读消息、发消息、回复都能触发认领。
 
 ## 快速开始
 
@@ -194,12 +197,43 @@ bots:
 
 - **Conversation 单 owner**：一个群/话题同时只属于一个 Session；
 - **发送前 gate**：`lark-cli` 的群发/话题回复会先校验 bot 在群、owner 在群，再认领；未授权直接 deny；
+- **读消息也认领**：读取群/话题历史消息会按同一规则绑定，先解绑旧 Session；
 - **手动绑定也会被认领覆盖**：从另一个 Session 往该群发消息，会按最新操作重新绑定；
 - **bot 懒授权**：只授予实际使用的 bot，不授予其他用户的 bot；
 - **审批**：只有 `approveUsers` 中的用户可以批准/拒绝；
 - **群准入**：`allowChats` + `autoEnableApproverChats` 控制哪些群可以启用。
 
 > `ownerUnionId` 的群成员校验依赖飞书权限；接口无权限时会降级为「bot 在群」并记录 warning。生产环境建议补齐成员读取权限。
+
+## 实时刷新
+
+绑定状态和连接状态都由 Host 通过 SSE 推送到浏览器：
+
+```text
+GET /feishu-bot/events
+```
+
+- `BindingRegistry` 发生 bind / unbind / grant 时推送 `bindings` 事件；
+- consumer ready / 重连也会推送状态变化；
+- 会话信息页和任务页收到事件后立即刷新；
+- 不依赖 3 秒轮询。
+
+## API（可选）
+
+`/feishu-bot/api` 供右侧栏和自动化使用：
+
+```text
+GET  ?action=status&refresh=1
+GET  ?action=chats&refresh=1
+GET  ?action=group&chatId=oc_...
+GET  ?action=topics&chatId=oc_...
+POST {"action":"bind","chatId":"oc_...","sessionId":"...","threadId":"omt_..."}
+POST {"action":"unbind","chatId":"oc_...","threadId":"omt_..."}
+```
+
+- `threadId` 省略表示整个群；传 `omt_...` 只操作该话题；
+- 绑定弹窗的话题来自该群最近 50 条消息；飞书话题没有独立标题字段，标题由消息内容推导；
+- 没有可读话题时，仍可绑定群主会话。
 
 ## 状态文件
 
@@ -241,6 +275,13 @@ pnpm run build
 - 群成员读取权限是否已申请；
 - 当前 bot 是否在群；
 - 查看 DSH 日志中的 `outbound claim rejected` / `cannot verify owner membership`。
+
+**绑定弹窗里没有话题？**
+
+- 飞书话题没有标题字段，标题由最近消息内容推导；
+- 话题列表扫描该群最近 50 条消息，较早的话题可能不在列表；
+- 群确实没有话题时，只能绑定群主会话；
+- 话题读取会先试 bot，失败再试 user 身份。
 
 **话题没有独立 Session？**
 
