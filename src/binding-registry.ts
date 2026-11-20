@@ -44,6 +44,11 @@ function makeKey(chatId: string, threadId: string): string {
   return threadId === '' ? chatId : `${chatId}::${threadId}`
 }
 
+/** Internal map key: one active owner per (bot, chat/thread). */
+function slot(botId: string, key: string): string {
+  return `${botId}\u0000${key}`
+}
+
 function isSource(value: unknown): value is BindingSource {
   return value === 'manual' || value === 'external' || value === 'auto'
 }
@@ -52,11 +57,11 @@ export class BindingRegistry {
   private readonly file: string
   private readonly legacyDir: string
   private readonly botId: string
-  /** key -> active bind record. */
+  /** (botId, binding key) -> active bind record. */
   private readonly active: Map<string, BindingRecord>
-  /** chatId -> candidate from an outbound bot message. */
+  /** (botId, chatId) -> candidate from an outbound bot message. */
   private readonly candidates: Map<string, BindingRecord>
-  /** chatId -> history, newest first. */
+  /** (botId, chatId) -> history, newest first. */
   private readonly historyByChat: Map<string, BindingRecord[]>
   private readonly suppressed: Set<string>
   readonly ready: Promise<void>
@@ -84,26 +89,28 @@ export class BindingRegistry {
 
   private addHistory(record: BindingRecord): void {
     if (record.sessionId === undefined) return
-    const list = this.historyByChat.get(record.chatId) ?? []
+    const mapKey = slot(record.botId, record.chatId)
+    const list = this.historyByChat.get(mapKey) ?? []
     const index = list.findIndex(item => item.sessionId === record.sessionId)
     if (index === -1) list.push(record)
     else if (list[index]!.at <= record.at) list[index] = record
     list.sort((left, right) => right.at - left.at)
-    this.historyByChat.set(record.chatId, list.slice(0, 100))
+    this.historyByChat.set(mapKey, list.slice(0, 100))
   }
 
   private apply(record: BindingRecord): void {
-    const key = record.key
+    const key = slot(record.botId, record.key)
+    const chatKey = slot(record.botId, record.chatId)
     if (record.op === 'candidate') {
-      const previous = this.candidates.get(record.chatId)
+      const previous = this.candidates.get(chatKey)
       if (record.sessionId !== undefined && (previous === undefined || record.at >= previous.at)) {
-        this.candidates.set(record.chatId, record)
+        this.candidates.set(chatKey, record)
       }
       return
     }
     if (record.op === 'unbind') {
       this.active.delete(key)
-      this.suppressed.add(record.chatId)
+      this.suppressed.add(chatKey)
       return
     }
     if (record.sessionId === undefined) return
@@ -112,7 +119,7 @@ export class BindingRegistry {
       return
     }
     this.active.set(key, record)
-    this.suppressed.delete(record.chatId)
+    this.suppressed.delete(chatKey)
     this.addHistory(record)
   }
 
@@ -214,20 +221,20 @@ export class BindingRegistry {
   }
 
   /** Active binding for one exact key. */
-  get(key: string): BindingRecord | undefined {
-    return this.active.get(key)
+  get(key: string, botId = this.botId): BindingRecord | undefined {
+    return this.active.get(slot(botId, key))
   }
 
-  resolve(chatId: string, threadId: string, routing: 'chat' | 'thread'): BindingResolution {
+  resolve(chatId: string, threadId: string, routing: 'chat' | 'thread', botId = this.botId): BindingResolution {
     const key = routing === 'thread' && threadId !== '' ? makeKey(chatId, threadId) : chatId
-    const current = this.active.get(key)
+    const current = this.active.get(slot(botId, key))
     if (current?.sessionId !== undefined) {
       return current.source === 'manual' || current.source === 'external'
         ? { kind: 'explicit', sessionId: current.sessionId, source: current.source, at: current.at, key }
         : { kind: 'auto', sessionId: current.sessionId, source: current.source, at: current.at, key }
     }
-    if (this.suppressed.has(chatId)) return { kind: 'unbound', key }
-    const candidate = this.candidates.get(chatId)
+    if (this.suppressed.has(slot(botId, chatId))) return { kind: 'unbound', key }
+    const candidate = this.candidates.get(slot(botId, chatId))
     if (candidate?.sessionId !== undefined) {
       return { kind: 'candidate', sessionId: candidate.sessionId, source: 'auto', at: candidate.at, key }
     }
@@ -235,13 +242,14 @@ export class BindingRegistry {
   }
 
   entries(): Array<[string, BindingRecord]> {
-    return [...this.active.entries()]
+    return [...this.active.values()].map(record => [record.key, record])
   }
 
-  listByChat(chatId: string, includeCandidates = false): BindingRecord[] {
-    const records = [...(this.historyByChat.get(chatId) ?? [])]
+  listByChat(chatId: string, includeCandidates = false, botId = this.botId): BindingRecord[] {
+    const chatKey = slot(botId, chatId)
+    const records = [...(this.historyByChat.get(chatKey) ?? [])]
     if (includeCandidates) {
-      const candidate = this.candidates.get(chatId)
+      const candidate = this.candidates.get(chatKey)
       if (candidate?.sessionId !== undefined && !records.some(item => item.sessionId === candidate.sessionId && item.at === candidate.at)) {
         records.push(candidate)
         records.sort((left, right) => right.at - left.at)
@@ -250,12 +258,12 @@ export class BindingRegistry {
     return records
   }
 
-  isSuppressed(chatId: string): boolean {
-    return this.suppressed.has(chatId)
+  isSuppressed(chatId: string, botId = this.botId): boolean {
+    return this.suppressed.has(slot(botId, chatId))
   }
 
-  candidateFor(chatId: string): BindingRecord | undefined {
-    return this.candidates.get(chatId)
+  candidateFor(chatId: string, botId = this.botId): BindingRecord | undefined {
+    return this.candidates.get(slot(botId, chatId))
   }
 
   private async append(record: BindingRecord): Promise<void> {
@@ -263,44 +271,32 @@ export class BindingRegistry {
     await appendFile(this.file, `${JSON.stringify(record)}\n`, 'utf8')
   }
 
-  async bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now()): Promise<BindingRecord> {
+  async bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now(), botId = this.botId): Promise<BindingRecord> {
     const key = makeKey(chatId, threadId)
     const record: BindingRecord = {
-      botId: this.botId, op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId, source, at, state: 'active',
+      botId, op: 'bind', key, chatId, ...(threadId === '' ? {} : { threadId }), sessionId, source, at, state: 'active',
     }
     this.apply(record)
     await this.append(record)
     return record
   }
 
-  async unbind(chatId: string, threadId: string, at = Date.now()): Promise<void> {
+  async unbind(chatId: string, threadId: string, at = Date.now(), botId = this.botId): Promise<void> {
     const key = makeKey(chatId, threadId)
-    const record: BindingRecord = { botId: this.botId, op: 'unbind', key, chatId, ...(threadId === '' ? {} : { threadId }), source: 'auto', at, state: 'unbound' }
+    const record: BindingRecord = { botId, op: 'unbind', key, chatId, ...(threadId === '' ? {} : { threadId }), source: 'auto', at, state: 'unbound' }
     this.apply(record)
     await this.append(record)
-    this.active.delete(key)
+    this.active.delete(slot(botId, key))
   }
 
-  async recordCandidate(chatId: string, sessionId: string, at = Date.now()): Promise<void> {
-    const record: BindingRecord = { botId: this.botId, op: 'candidate', key: chatId, chatId, sessionId, source: 'auto', at, state: 'candidate' }
+  async recordCandidate(chatId: string, sessionId: string, at = Date.now(), botId = this.botId): Promise<void> {
+    const record: BindingRecord = { botId, op: 'candidate', key: chatId, chatId, sessionId, source: 'auto', at, state: 'candidate' }
     this.apply(record)
     await this.append(record)
   }
 
-  async clearSuppression(chatId: string): Promise<void> {
-    this.suppressed.delete(chatId)
+  async clearSuppression(chatId: string, botId = this.botId): Promise<void> {
+    this.suppressed.delete(slot(botId, chatId))
   }
 
-  /** Append a compaction tombstone? Kept for a future file-size pass. */
-  async flush(): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true })
-    const records: BindingRecord[] = []
-    for (const record of this.historyByChat.values()) records.push(...record)
-    for (const record of this.active.values()) records.push(record)
-    for (const record of this.candidates.values()) records.push(record)
-    for (const chatId of this.suppressed) records.push({ botId: this.botId, op: 'unbind', key: chatId, chatId, source: 'auto', at: Date.now(), state: 'unbound' })
-    const temp = `${this.file}.${process.pid}.tmp`
-    await writeFile(temp, records.map(record => JSON.stringify(record)).join('\n') + (records.length === 0 ? '' : '\n'), 'utf8')
-    await rename(temp, this.file)
-  }
 }

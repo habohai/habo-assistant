@@ -55,3 +55,21 @@ test('binding registry resolves explicit, auto, unbound, and thread scopes', asy
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('binding registry isolates the same chat for different bots', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'habo-binding-'))
+  try {
+    const registry = new BindingRegistry(dir, 'bot_a')
+    await registry.ready
+    await registry.bind('oc_1', '', 'ses_a', 'manual', 10, 'bot_a')
+    await registry.bind('oc_1', '', 'ses_b', 'manual', 20, 'bot_b')
+    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_a').sessionId, 'ses_a')
+    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_b').sessionId, 'ses_b')
+    assert.equal(registry.entries().length, 2)
+    await registry.unbind('oc_1', '', 30, 'bot_a')
+    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_a').kind, 'unbound')
+    assert.equal(registry.resolve('oc_1', '', 'chat', 'bot_b').kind, 'explicit')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

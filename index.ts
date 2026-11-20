@@ -634,7 +634,7 @@ export class FeishuBot {
     if (this.approvals.has(chatId)) this.settleApproval(chatId, 'cancelled')
     for (const [, record] of records) {
       const sessionId = record.sessionId
-      await this.registry.unbind(record.chatId, record.threadId ?? '')
+      await this.registry.unbind(record.chatId, record.threadId ?? '', Date.now(), record.botId)
       if (sessionId === undefined) continue
       const pending = this.pending.get(sessionId)
       if (pending?.chatId === chatId) {
