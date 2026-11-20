@@ -225,6 +225,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.privateWith': '与 {name} 的私聊',
       'feishu.bot': '机器人',
       'feishu.boundBots': '已绑定的机器人',
+      'feishu.sessionBindingsCount': '当前会话绑定 {count} 个群/话题',
       'feishu.bind': '绑定飞书群',
       'feishu.refresh': '刷新',
       'feishu.empty': '还没有绑定飞书群',
@@ -314,6 +315,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.privateWith': 'DM with {name}',
       'feishu.bot': 'Bot',
       'feishu.boundBots': 'Bound bots',
+      'feishu.sessionBindingsCount': 'This session is bound to {count} conversations',
       'feishu.bind': 'Bind Feishu group',
       'feishu.refresh': 'Refresh',
       'feishu.empty': 'No Feishu group bound yet',
@@ -433,6 +435,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-input:focus { border-color: var(--dsw-alias-state-business-primary); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-state-business-primary); }
 .sa-bot-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .sa-bot-picker .sa-input { flex: 1; }
+.sa-session-bindings { margin: 2px 0 10px; padding-bottom: 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.sa-binding-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 0; }
+.sa-binding-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); font-size: 12px; }
+.sa-binding-bot { flex: none; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .sa-group-bots { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 8px; }
 .sa-group-bot { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .sa-group-bot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1293,12 +1299,15 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       busy: boolean
       onClose: () => void
       onUnbind: (chatId: string, botId?: string) => void
+      onUnbindBinding: (binding: FeishuBinding) => void
+      sessionBindings: FeishuBinding[]
+      botNames: Map<string, string>
       sessionTitle: (sessionId: string) => string
       t: TFunction
     }
 
     /** One group's binding history: sessions newest first, with the active one marked. */
-    function GroupDialog({ open, group, loading, error, busy, onClose, onUnbind, sessionTitle, t }: GroupDialogProps) {
+    function GroupDialog({ open, group, loading, error, busy, onClose, onUnbind, onUnbindBinding, sessionBindings, botNames, sessionTitle, t }: GroupDialogProps) {
       useEffect(() => {
         if (!open) return undefined
         const onKey = (event: KeyboardEvent): void => {
@@ -1336,6 +1345,28 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             : isPrivate
               ? t('feishu.privateTitle')
               : `${group.chatId}${group.botMember ? '' : ` · ${t('feishu.botMissing')}`}`),
+          sessionBindings.length === 0
+            ? null
+            : h('div', { className: 'sa-session-bindings' },
+              h('div', { className: 'sa-subhead', style: { paddingLeft: 0 } }, t('feishu.sessionBindingsCount', { count: String(sessionBindings.length) })),
+              sessionBindings.map(binding => {
+                const key = `${binding.chatId}::${binding.threadId ?? ''}`
+                const botIds = binding.botIds ?? (binding.botId === undefined ? [] : [binding.botId])
+                const names = [...new Set(botIds.map(id => botNames.get(id) ?? id))].join(' / ')
+                return h('div', { className: 'sa-binding-row', key },
+                  h('span', { className: 'sa-binding-name' },
+                    `${groupDisplayName(binding.chatName, binding.chatId)}${binding.threadId === undefined || binding.threadId === '' ? '' : ` · ${t('feishu.topicLabel')}`}`),
+                  h('span', { className: 'sa-binding-bot' }, names),
+                  h('button', {
+                    type: 'button',
+                    className: 'sa-button',
+                    disabled: busy,
+                    title: `${t('feishu.unbind')} ${groupDisplayName(binding.chatName, binding.chatId)}`,
+                    onClick: () => { onUnbindBinding(binding) },
+                  }, t('feishu.unbind')),
+                )
+              }),
+            ),
           group?.bots === undefined || group.bots.length === 0
             ? null
             : h('div', { className: 'sa-group-bots' },
@@ -1512,6 +1543,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         onBind: bindChatToSession,
         t,
       })
+      const sessionBindings = (feishu.data?.bindings ?? []).filter(binding => binding.sessionId === sessionId)
+      const botNameMap = new Map((feishu.data?.bots ?? []).map(bot => [bot.id, bot.name]))
       const groupDialog = h(GroupDialog, {
         open: groupOpen,
         group,
@@ -1520,6 +1553,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         busy: binding,
         onClose: () => { setGroupOpen(false) },
         onUnbind: unbindChat,
+        onUnbindBinding: (target: FeishuBinding) => { unbindChat(target.chatId) },
+        sessionBindings,
+        botNames: botNameMap,
         sessionTitle: sessionTitleOf,
         t,
       })
