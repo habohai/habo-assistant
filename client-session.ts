@@ -961,10 +961,15 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     /** Bound Feishu groups and the bot that owns them. */
     function FeishuPanel({ sessionId, status, loading, error, actionError, onBind, onOpenGroup, onUnbind, onReload, t }: FeishuPanelProps) {
       const bound = (status?.bindings ?? []).filter(binding => binding.sessionId === sessionId)
+      const botById = new Map((status?.bots ?? []).map(bot => [bot.id, bot.name]))
+      const botNames = [...new Set((status?.bots ?? []).map(bot => bot.name).filter(name => name !== ''))]
       const bot = status?.bot
-      const botLabel = bot === undefined
-        ? ''
-        : [bot.name, bot.openId].filter(value => typeof value === 'string' && value !== '').join(' · ')
+      const botLabel = botNames.length > 0
+        ? botNames.join(' / ')
+        : bot === undefined
+          ? ''
+          : [bot.name, bot.openId].filter(value => typeof value === 'string' && value !== '').join(' · ')
+      const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
       return h('section', { className: 'sa-feishu' },
         h('div', { className: 'sa-feishu-head' },
           h('span', { className: 'sa-feishu-title' }, t('feishu.title')),
@@ -1008,7 +1013,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
                   h('span', { className: 'sa-feishu-name' }, groupDisplayName(binding.chatName, binding.chatId)),
-                  h('span', { className: 'sa-feishu-id' }, binding.chatId),
+                  h('span', { className: 'sa-feishu-id', title: binding.botId }, binding.botId === undefined || botNameOf(binding.botId) === '' ? binding.chatId : `${binding.chatId} · ${botNameOf(binding.botId)}`),
                 ),
                 binding.botMember === false
                   ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true', title: t('feishu.botMissingHint') }, t('feishu.botMissing'))

@@ -347,7 +347,7 @@ export class FeishuBot {
     if (event === undefined) return
     this.lastEventAt = Date.now()
     this.metrics.inc('eventsReceived')
-    if (!this.seen.claim(event.messageId)) {
+    if (!this.seen.claim(`${this.config.botId}:${event.messageId}`)) {
       this.metrics.inc('deduped')
       return
     }
@@ -1250,7 +1250,7 @@ export class BotHost {
       bindings: this.bots.reduce((sum, bot) => sum + bot.registry.entries().length, 0),
       bots: this.bots.map(bot => {
         const status = bot.status()
-        return { id: bot.config.botId, name: bot.config.botName, ready: status.ready, consumer: status.consumer }
+        return { id: bot.config.botId, name: bot.config.botName, ready: status.ready, consumer: status.consumer, lastEventAt: status.lastEventAt }
       }),
     }
   }

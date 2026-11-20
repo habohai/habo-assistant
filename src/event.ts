@@ -44,7 +44,35 @@ export function cleanMessageText(content: unknown, mentions: Mention[] = [], bot
  */
 export function readFeishuEvent(raw: unknown): FeishuEvent | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const value = raw as Record<string, unknown>
+  let value = raw as Record<string, unknown>
+  // Feishu event v2 envelope: { header, event: { sender, message } }.
+  const envelope = value.event
+  if (value.chat_id === undefined && envelope !== null && typeof envelope === 'object') {
+    const event = envelope as Record<string, unknown>
+    const message = event.message
+    if (message !== null && typeof message === 'object') {
+      const msg = message as Record<string, unknown>
+      const sender = event.sender as { sender_id?: { open_id?: unknown }; sender_type?: unknown } | undefined
+      const mentions = Array.isArray(msg.mentions) ? msg.mentions : []
+      return {
+        chatId: typeof msg.chat_id === 'string' ? msg.chat_id : '',
+        chatType: typeof msg.chat_type === 'string' ? msg.chat_type : '',
+        messageId: typeof msg.message_id === 'string' ? msg.message_id : '',
+        threadKey: typeof msg.thread_id === 'string' ? msg.thread_id : typeof msg.root_id === 'string' ? msg.root_id : '',
+        senderType: typeof sender?.sender_type === 'string' ? sender.sender_type : '',
+        senderId: typeof sender?.sender_id?.open_id === 'string' ? sender.sender_id.open_id : '',
+        messageType: typeof msg.message_type === 'string' ? msg.message_type : '',
+        mentions: mentions.filter(item => item && typeof item === 'object').map(item => {
+          const mention = item as Record<string, unknown>
+          return {
+            ...(typeof mention.id === 'string' ? { id: mention.id } : {}),
+            ...(typeof mention.name === 'string' ? { name: mention.name } : {}),
+          }
+        }),
+        content: typeof msg.content === 'string' ? msg.content : '',
+      }
+    }
+  }
   const chatId = typeof value.chat_id === 'string' ? value.chat_id : ''
   const messageId = typeof value.message_id === 'string'
     ? value.message_id

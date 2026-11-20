@@ -170,6 +170,7 @@ export function configProblem(config: Config): string | undefined {
     ids.add(bot.id)
     const profile = bot.profile ?? ''
     if (config.bots.length > 1 && profile === '') return `bot ${bot.id} needs a larkProfile when multiple bots are configured`
+    if (config.bots.length > 1 && (bot.openId === undefined || bot.openId === '')) return `bot ${bot.id} needs an openId when multiple bots are configured`
     if (profile !== '') {
       if (profiles.has(profile)) return `duplicate larkProfile: ${profile}`
       profiles.add(profile)

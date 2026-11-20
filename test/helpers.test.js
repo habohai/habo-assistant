@@ -53,6 +53,19 @@ test('readFeishuEvent flattens the CLI event', () => {
   assert.deepEqual(event.mentions, [{ id: 'ou_bot' }])
   assert.equal(readFeishuEvent({ chat_id: 'oc_1' }), undefined)
   assert.equal(readFeishuEvent(null), undefined)
+  const wrapped = readFeishuEvent({
+    header: { event_type: 'im.message.receive_v1' },
+    event: {
+      sender: { sender_type: 'user', sender_id: { open_id: 'ou_1' } },
+      message: {
+        chat_id: 'oc_2', chat_type: 'group', message_id: 'om_2', message_type: 'text',
+        content: '@_user_1 hi', mentions: [{ id: 'ou_bot', name: 'bot' }],
+      },
+    },
+  })
+  assert.equal(wrapped?.chatId, 'oc_2')
+  assert.equal(wrapped?.senderId, 'ou_1')
+  assert.deepEqual(wrapped?.mentions, [{ id: 'ou_bot', name: 'bot' }])
 })
 
 test('acceptEvent filters chats, senders, and types', () => {
