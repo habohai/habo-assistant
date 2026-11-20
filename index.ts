@@ -620,6 +620,7 @@ export class FeishuBot {
     if (command === '' || !command.includes('lark-cli')) return undefined
     const asUser = /(?:^|\s)--as(?:\s+|=)user\b/.test(command)
     const isRead = command.includes('+chat-messages-list')
+      || command.includes('+threads-messages-list')
       || command.includes('+messages-mget')
       || command.includes('+messages-search')
     if (asUser && !isRead) return undefined
@@ -649,6 +650,13 @@ export class FeishuBot {
   }
 
   private async gateRead(command: string, sessionId: string): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string }> {
+    if (command.includes('+threads-messages-list')) {
+      const thread = /--thread(?:\s+|=)(om_[A-Za-z0-9]+|omt_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (thread === undefined) return { kind: 'allow' }
+      const context = await this.cli.threadContext(thread).catch(() => undefined)
+      if (context === undefined) return { kind: 'allow' }
+      return this.gateOutbound(context.chatId, context.threadId, sessionId, 'read')
+    }
     if (command.includes('+messages-mget')) {
       const raw = /--message-ids(?:\s+|=)([^\s]+)/.exec(command)?.[1] ?? ''
       const messageIds = raw.split(',').map(id => id.trim()).filter(id => /^om_[A-Za-z0-9]+$/.test(id)).slice(0, 5)
@@ -702,6 +710,15 @@ export class FeishuBot {
     }
     if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return
     const at = typeof event.time === 'number' ? event.time : Date.now()
+    if (command.includes('+threads-messages-list')) {
+      const thread = /--thread(?:\s+|=)(om_[A-Za-z0-9]+|omt_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (thread !== undefined) {
+        void this.cli.threadContext(thread)
+          .then(context => context === undefined ? undefined : this.claimOutbound(context.chatId, context.threadId, sessionId, at, 'read'))
+          .catch(() => undefined)
+      }
+      return
+    }
     if (command.includes('+chat-messages-list') || command.includes('+messages-search')) {
       const chatId = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)?.[1]
       if (chatId !== undefined) void this.claimOutbound(chatId, '', sessionId, at, 'read')

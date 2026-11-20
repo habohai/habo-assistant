@@ -229,6 +229,33 @@ export class LarkCli {
     return chats.find(chat => chat.chatId === chatId)?.name ?? this.chatNames.get(chatId)
   }
 
+  /** Resolve a thread's parent chat; thread ids alone do not carry a chat id. */
+  async threadContext(threadId: string): Promise<{ chatId: string; threadId: string } | undefined> {
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+threads-messages-list',
+          '--thread', threadId,
+          '--page-size', '1',
+          '--no-reactions',
+          '--as', identity,
+          '--json',
+        ])
+        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
+        const message = parsed.data?.messages?.[0]
+        if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
+        return {
+          chatId: message.chat_id,
+          threadId: typeof message.thread_id === 'string' && message.thread_id !== '' ? message.thread_id : threadId,
+        }
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('cannot read thread context')
+  }
+
   /** Recent topics visible in a chat, keyed by omt_ thread id. */
   async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
     const { stdout } = await this.run([

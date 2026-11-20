@@ -607,3 +607,23 @@ test('reading group messages claims the conversation', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('reading a thread claims its topic conversation', async () => {
+  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.cli.threadContext = async () => ({ chatId: 'oc_1', threadId: 'omt_topic' })
+    const decision = await bot.outboundGate({
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'lark-cli im +threads-messages-list --thread omt_topic --as user' }),
+      agent: { session: { id: 'ses_topic_reader' } },
+    })
+    assert.equal(decision.kind, 'allow')
+    assert.equal(bot.registry.get('oc_1::omt_topic')?.sessionId, 'ses_topic_reader')
+    assert.equal(bot.registry.get('oc_1::omt_topic')?.source, 'read')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
