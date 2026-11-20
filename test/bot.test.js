@@ -567,3 +567,24 @@ test('pre-execute continues the waterfall for non-lark tools', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a plain reply claims the group main conversation', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.cli.messageContext = async () => ({ chatId: 'oc_1', threadId: 'omt_topic' })
+    bot.observeOutboundChat('ses_reply', {
+      type: 'tool/call',
+      data: {
+        name: 'bash',
+        arguments: JSON.stringify({ command: 'lark-cli im +messages-reply --message-id om_root --as bot --text hi' }),
+      },
+    })
+    await waitFor(() => bot.registry.get('oc_1')?.sessionId === 'ses_reply')
+    assert.equal(bot.registry.get('oc_1::omt_topic'), undefined)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

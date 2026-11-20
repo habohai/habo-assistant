@@ -632,12 +632,13 @@ export class FeishuBot {
       if (chatId === undefined) return undefined
       return this.gateOutbound(chatId, '', sessionId)
     }
-    if (command.includes('+messages-reply') && /(?:^|\s)--reply-in-thread\b/.test(command)) {
+    if (command.includes('+messages-reply')) {
       const messageId = /--message-id(?:\s+|=)(om_[A-Za-z0-9]+)/.exec(command)?.[1]
       if (messageId === undefined) return undefined
       const context = await this.cli.messageContext(messageId).catch(() => undefined)
-      if (context === undefined || context.threadId === '') return undefined
-      return this.gateOutbound(context.chatId, context.threadId, sessionId)
+      if (context === undefined) return undefined
+      const inThread = /(?:^|\s)--reply-in-thread\b/.test(command)
+      return this.gateOutbound(context.chatId, inThread ? context.threadId : '', sessionId)
     }
     return undefined
   }
@@ -684,20 +685,21 @@ export class FeishuBot {
       void this.claimOutbound(match[1] as string, '', sessionId, at)
       return
     }
-    if (command.includes('+messages-reply') && /(?:^|\s)--reply-in-thread\b/.test(command)) {
+    if (command.includes('+messages-reply')) {
       const messageId = /--message-id(?:\s+|=)(om_[A-Za-z0-9]+)/.exec(command)?.[1]
       if (messageId === undefined) return
-      void this.claimOutboundReply(messageId, sessionId, at)
+      const inThread = /(?:^|\s)--reply-in-thread\b/.test(command)
+      void this.claimOutboundReply(messageId, inThread, sessionId, at)
     }
   }
 
-  private async claimOutboundReply(messageId: string, sessionId: string, at: number): Promise<void> {
+  private async claimOutboundReply(messageId: string, inThread: boolean, sessionId: string, at: number): Promise<void> {
     try {
       const context = await this.cli.messageContext(messageId)
-      if (context === undefined || context.threadId === '') return
-      await this.claimOutbound(context.chatId, context.threadId, sessionId, at)
+      if (context === undefined) return
+      await this.claimOutbound(context.chatId, inThread ? context.threadId : '', sessionId, at)
     } catch (error) {
-      this.ctx.logger.warn(`feishu-bot: cannot resolve outbound topic for ${messageId}: ${String(error)}`)
+      this.ctx.logger.warn(`feishu-bot: cannot resolve outbound reply for ${messageId}: ${String(error)}`)
     }
   }
 
