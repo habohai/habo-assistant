@@ -112,7 +112,7 @@ export function normalizeConfig(raw: unknown): Config {
     ackReaction: normalizeAckReaction(string('ackReaction', 'OnIt')),
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
-    replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines),
+    replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),
     maxConcurrent: integer('maxConcurrent', DEFAULTS.maxConcurrent, 1, 32),
     maxQueue: integer('maxQueue', DEFAULTS.maxQueue, 1, 500),
     cliTimeoutMs: integer('cliTimeoutMs', DEFAULTS.cliTimeoutMs, 1_000, 120_000),

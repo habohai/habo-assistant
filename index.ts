@@ -379,7 +379,7 @@ export class FeishuBot {
       return
     }
     if (event.chatType === 'p2p') {
-      void this.chats.allow(event.chatId, Date.now(), 'p2p').catch(error => {
+      void this.chats.markKind(event.chatId, 'p2p').catch(error => {
         this.ctx.logger.warn(`feishu-bot: cannot remember p2p chat ${event.chatId}: ${String(error)}`)
       })
     }
@@ -607,22 +607,24 @@ export class FeishuBot {
   async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
-    return this.registry.entries().flatMap(([key, record]) => {
+    const summaries = await Promise.all(this.registry.entries().map(async ([key, record]) => {
       if (record.sessionId === undefined) return []
       const chatId = key.split('::')[0]
       const info = byId.get(chatId)
       const p2p = info === undefined && this.chats.kind(chatId) === 'p2p'
+      const peer = p2p ? await this.cli.peerName(chatId) : undefined
       return [{
         chatId,
-        chatType: this.chats.kind(chatId) === 'p2p' || p2p ? 'p2p' : 'group',
+        chatType: (this.chats.kind(chatId) === 'p2p' || p2p ? 'p2p' : 'group') as 'p2p' | 'group',
         botId: record.botId,
         sessionId: record.sessionId,
         source: record.source,
         boundAt: record.at,
-        ...(info === undefined || info.name === '' ? {} : { chatName: info.name }),
+        ...(info === undefined || info.name === '' ? peer === undefined ? {} : { chatName: peer } : { chatName: info.name }),
         botMember: info?.botMember === true || p2p,
       }]
-    })
+    }))
+    return summaries.flat()
   }
 
   /** Every chat the bot can see, annotated with allowlist/binding state. */
@@ -1283,17 +1285,21 @@ export class BotHost {
   }
 
   status(): Record<string, unknown> {
-    const primary = this.primary.status()
+    const statuses = this.bots.map(bot => ({ bot, status: bot.status() }))
+    const primary = statuses[0]
     return {
-      ...primary,
-      ready: this.bots.every(bot => bot.status().ready === true),
-      consumer: this.bots.every(bot => bot.status().consumer === true),
-      stopping: this.bots.some(bot => bot.status().stopping === true),
+      ...(primary?.status ?? {}),
+      ready: statuses.every(entry => entry.status.ready === true),
+      consumer: statuses.every(entry => entry.status.consumer === true),
+      stopping: statuses.some(entry => entry.status.stopping === true),
       bindings: this.bots.reduce((sum, bot) => sum + bot.registry.entries().length, 0),
-      bots: this.bots.map(bot => {
-        const status = bot.status()
-        return { id: bot.config.botId, name: bot.config.botName, ready: status.ready, consumer: status.consumer, lastEventAt: status.lastEventAt }
-      }),
+      bots: statuses.map(({ bot, status }) => ({
+        id: bot.config.botId,
+        name: bot.config.botName,
+        ready: status.ready,
+        consumer: status.consumer,
+        lastEventAt: status.lastEventAt,
+      })),
     }
   }
 
@@ -1309,8 +1315,9 @@ export class BotHost {
   async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean; bots: Array<{ id: string; name: string; openId?: string; member: boolean; bound: boolean }> }>> {
     const merged = new Map<string, { chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>()
     const memberships = new Map<string, Map<string, boolean>>()
-    for (const bot of this.bots) {
-      for (const chat of await bot.availableChats(force)) {
+    const chatLists = await Promise.all(this.bots.map(bot => bot.availableChats(force)))
+    for (const [index, bot] of this.bots.entries()) {
+      for (const chat of chatLists[index] ?? []) {
         const previous = merged.get(chat.chatId)
         if (previous === undefined) merged.set(chat.chatId, { ...chat })
         else {
@@ -1349,18 +1356,15 @@ export class BotHost {
     const bots = chatRow?.bots ?? []
     let chatName = ''
     let botMember = false
-    for (const bot of this.bots) {
-      try {
-        const detail = await bot.groupDetail(chatId)
-        if (chatName === '' && detail.chatName !== undefined) chatName = detail.chatName
-        botMember = botMember || detail.botMember
-        for (const session of detail.sessions) {
-          const previous = merged.get(session.sessionId)
-          if (previous === undefined || session.at > previous.at) merged.set(session.sessionId, session)
-          else if (session.current) previous.current = true
-        }
-      } catch {
-        // A bot that is not in the chat cannot resolve its name; keep the others.
+    const details = await Promise.all(this.bots.map(bot => bot.groupDetail(chatId).catch(() => undefined)))
+    for (const detail of details) {
+      if (detail === undefined) continue
+      if (chatName === '' && detail.chatName !== undefined) chatName = detail.chatName
+      botMember = botMember || detail.botMember
+      for (const session of detail.sessions) {
+        const previous = merged.get(session.sessionId)
+        if (previous === undefined || session.at > previous.at) merged.set(session.sessionId, session)
+        else if (session.current) previous.current = true
       }
     }
     return {

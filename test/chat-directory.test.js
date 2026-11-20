@@ -19,6 +19,8 @@ test('chat directory migrates dynamic groups and persists runtime enables', asyn
     assert.equal(second.isAllowed('oc_runtime'), true)
     assert.equal(second.size, 3)
     assert.equal(second.kind('oc_private'), 'p2p')
+    await second.markKind('oc_private', 'p2p')
+    assert.equal(second.kind('oc_private'), 'p2p')
     assert.deepEqual(second.entries().find(([id]) => id === 'oc_runtime'), ['oc_runtime', 42])
   } finally {
     await rm(dir, { recursive: true, force: true })

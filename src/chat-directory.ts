@@ -75,6 +75,14 @@ export class ChatDirectory {
     return this.runtime.get(chatId)?.kind
   }
 
+  /** Remember a chat kind without re-flushing on every message. */
+  async markKind(chatId: string, kind: 'group' | 'p2p'): Promise<void> {
+    const entry = this.runtime.get(chatId)
+    if (entry?.kind === kind) return
+    this.runtime.set(chatId, { allowedAt: entry?.allowedAt ?? Date.now(), kind })
+    await this.flush()
+  }
+
   get size(): number {
     return this.runtime.size
   }

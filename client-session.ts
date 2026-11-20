@@ -1051,7 +1051,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               },
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
-                  h('span', { className: 'sa-feishu-name' }, isPrivate ? t('feishu.privateWith', { name: names === '' ? t('feishu.bot') : names }) : groupDisplayName(binding.chatName, binding.chatId)),
+                  h('span', { className: 'sa-feishu-name' }, isPrivate
+                    ? t('feishu.privateWith', { name: binding.chatName === undefined || binding.chatName === '' ? (names === '' ? t('feishu.bot') : names) : binding.chatName })
+                    : groupDisplayName(binding.chatName, binding.chatId)),
                   h('span', { className: 'sa-feishu-meta' }, names === '' ? t('feishu.boundBots') : names),
                 ),
                 !isPrivate && binding.botMember === false
