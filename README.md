@@ -48,6 +48,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
     autoEnableApproverChats: true
 ```
 
+私聊 session 默认 **30 天**过期，过期后下一条私聊自动新建会话；可用 `p2pSessionTtlMs` 调整，群聊不受影响。
+
 `stateDir` 默认仍是 `~/.dsh/feishu-bot`。绑定状态现在统一为 append-only 的 `binding-state.v2.jsonl`：
 
 - 首次加载会把旧的 `bindings.json` / `binding-history.json` / `chat-affinity.json` / `suppressed-chats.json` 自动迁移；

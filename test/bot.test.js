@@ -378,3 +378,22 @@ test('unbind suppresses discovery and the next message starts a fresh session', 
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('an expired p2p binding starts a fresh Session', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    const old = Date.now() - 31 * 24 * 60 * 60 * 1000
+    await bot.registry.bind('oc_1', '', 'ses_old', 'manual', old)
+    const event = {
+      chatId: 'oc_1', chatType: 'p2p', messageId: 'om_p2p', threadKey: '',
+      senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions: [], content: 'hi',
+    }
+    const sessionId = await bot.ensureSession('oc_1', event, 'hi')
+    assert.equal(sessionId, 'ses_1')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_1')
+    assert.equal(bot.registry.get('oc_1')?.source, 'auto')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

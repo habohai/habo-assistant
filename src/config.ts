@@ -46,6 +46,8 @@ export interface Config {
   permissionPreset: string
   autoEnableApproverChats: boolean
   approvalTimeoutMs: number
+  /** A direct (p2p) binding older than this starts a fresh Session. */
+  p2pSessionTtlMs: number
   approveUsers: string[]
   stateDir: string
   dryRun: boolean
@@ -61,6 +63,7 @@ export const DEFAULTS = {
   readyTimeoutMs: 30_000,
   statsIntervalMs: 5 * 60 * 1000,
   approvalTimeoutMs: 2 * 60 * 1000,
+  p2pSessionTtlMs: 30 * 24 * 60 * 60 * 1000,
 }
 
 /** `none`/`off` (any case) disables the acknowledgement reaction. */
@@ -115,6 +118,7 @@ export function normalizeConfig(raw: unknown): Config {
     permissionPreset: string('permissionPreset'),
     autoEnableApproverChats: value.autoEnableApproverChats !== false && value.autoEnableOwnerChats !== false,
     approvalTimeoutMs: integer('approvalTimeoutMs', DEFAULTS.approvalTimeoutMs, 10_000, 30 * 60 * 1000),
+    p2pSessionTtlMs: integer('p2pSessionTtlMs', DEFAULTS.p2pSessionTtlMs, 60_000, 365 * 24 * 60 * 60 * 1000),
     /** Approver open_ids; empty means any member of the chat may answer. */
     approveUsers: list('approveUsers'),
     stateDir: string('stateDir') || join(homedir(), '.dsh', 'feishu-bot'),

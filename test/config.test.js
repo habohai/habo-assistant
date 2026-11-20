@@ -13,6 +13,8 @@ test('normalizeConfig keeps documented defaults', () => {
   assert.equal(config.progress, true)
   assert.equal(config.workspaceId, undefined)
   assert.equal(config.larkProfile, undefined)
+  assert.equal(config.p2pSessionTtlMs, 30 * 24 * 60 * 60 * 1000)
+  assert.equal(normalizeConfig({ p2pSessionTtlMs: 7 * 24 * 60 * 60 * 1000 }).p2pSessionTtlMs, 7 * 24 * 60 * 60 * 1000)
   assert.equal(normalizeConfig({ larkProfile: ' bot-a ' }).larkProfile, 'bot-a')
   const multi = normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], bots: [
     { id: 'a', name: 'A', profile: 'p1' },

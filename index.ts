@@ -1080,6 +1080,13 @@ export class FeishuBot {
     const resolution = this.registry.resolve(event.chatId, event.threadKey, this.routing)
     const known = 'sessionId' in resolution ? resolution.sessionId : undefined
     const workspace = this.workspace()
+    if (event.chatType === 'p2p'
+      && (resolution.kind === 'explicit' || resolution.kind === 'auto')
+      && resolution.at > 0
+      && Date.now() - resolution.at >= this.config.p2pSessionTtlMs) {
+      // Direct chats expire after the configured TTL; start a fresh Session.
+      return this.createSessionForChat(key, event, text)
+    }
     if (known !== undefined && resolution.kind === 'explicit') {
       // Explicit/manual binding is authoritative: never discover, digest, or create.
       if (workspace !== undefined && !workspace.sessionIds.includes(known)) {
