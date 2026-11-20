@@ -248,6 +248,7 @@ test('a rejection resolves as rejected and non-approvers cannot answer', async (
 
 test('an unanswered approval times out as unavailable', async () => {
   const { bot, stateDir, listeners } = await createBot({ approveUsers: ['ou_1'] })
+  const keepAlive = setInterval(() => {}, 50)
   try {
     bot.config.approvalTimeoutMs = 20
     bot.trackSession('ses_1', 'oc_1')
@@ -261,6 +262,7 @@ test('an unanswered approval times out as unavailable', async () => {
     }, () => Promise.resolve('unavailable'))
     assert.equal(await pending, 'unavailable')
   } finally {
+    clearInterval(keepAlive)
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
   }
