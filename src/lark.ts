@@ -14,7 +14,7 @@
 
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
-const OUTPUT_LIMIT_BYTES = 64 * 1024
+const OUTPUT_LIMIT_BYTES = 256 * 1024
 const DEFAULT_CHAT_LIST_TTL_MS = 5 * 60_000
 
 export interface ChatSummary {
@@ -299,7 +299,7 @@ export class LarkCli {
           '--chat-id', chatId,
           '--as', identity,
           '--order', 'desc',
-          '--page-size', '50',
+          '--page-size', '20',
           '--no-reactions',
           '--json',
         ])
