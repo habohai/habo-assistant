@@ -1054,7 +1054,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       busy: boolean
       onClose: () => void
       onRefresh: () => void
-      onBind: (chatId: string) => void
+      onBind: (chatId: string, botId?: string) => void
       t: TFunction
     }
 
@@ -1090,7 +1090,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         || chat.chatId.toLowerCase().includes(needle))
       const target = manual.trim() !== '' ? manual.trim() : selected
       const selectedChat = chats.find(chat => chat.chatId === selected)
-      const availableBots = selectedChat?.bots?.filter(bot => bot.member) ?? bots
+      const availableBots = selectedChat?.bots?.filter(bot => bot.member) ?? []
       const choose = (chatId: string): void => {
         setSelected(chatId)
         setManual('')
@@ -1099,7 +1099,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         if (memberBots.length > 0 && !memberBots.some(bot => bot.id === botId)) onBotChange(memberBots[0].id)
       }
       const submit = (): void => {
-        if (target !== '' && !busy) onBind(target)
+        if (target !== '' && !busy) onBind(target, selectedChat === undefined ? '' : botId)
       }
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
@@ -1115,16 +1115,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           ),
           h('div', { className: 'sa-dialog-desc' }, t('feishu.bindHint')),
           h('div', { className: 'sa-dialog-body' },
-            availableBots.length > 1
-              ? h('label', { className: 'sa-bot-picker' },
-                h('span', null, t('feishu.botLabel')),
-                h('select', {
-                  className: 'sa-input',
-                  value: botId,
-                  onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
-                }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
-              )
-              : null,
             h('input', {
               className: 'sa-input',
               value: query,
@@ -1133,7 +1123,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               onKeyDown: (event: { key: string; preventDefault(): void }) => {
                 if (event.key !== 'Enter') return
                 event.preventDefault()
-                if (visible.length === 1) onBind(visible[0].chatId)
+                if (visible.length === 1) onBind(visible[0].chatId, visible[0].bots?.find(bot => bot.member)?.id)
                 else submit()
               },
             }),
@@ -1162,6 +1152,16 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                         : chat.bound ? h('span', { className: 'sa-chat-badge' }, t('feishu.bound')) : null,
                     ),
                   ))),
+            selectedChat === undefined || availableBots.length === 0
+              ? null
+              : h('label', { className: 'sa-bot-picker' },
+                h('span', null, t('feishu.botLabel')),
+                h('select', {
+                  className: 'sa-input',
+                  value: botId,
+                  onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
+                }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
+              ),
             h('button', {
               type: 'button',
               className: 'sa-manual-toggle',
@@ -1359,14 +1359,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         setBindOpen(true)
         loadChats()
       }
-      const bindChatToSession = (chatId: string): void => {
+      const bindChatToSession = (chatId: string, requestedBotId?: string): void => {
         if (chatId === '' || binding) return
         setBinding(true)
         setActionError('')
         fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'bind', chatId, sessionId, botId }),
+          body: JSON.stringify({ action: 'bind', chatId, sessionId, botId: requestedBotId ?? botId }),
         })
           .then(() => {
             setBindOpen(false)
