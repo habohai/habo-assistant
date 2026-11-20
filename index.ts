@@ -1357,8 +1357,7 @@ export class BotHost {
   }
 
   async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
-    const summaries = await Promise.all(this.bots.map(bot => bot.bindingSummaries(force)))
-    return summaries.flat()
+    return this.primary.bindingSummaries(force)
   }
 
   async bindingStatus(force = false): Promise<Record<string, unknown>> {
