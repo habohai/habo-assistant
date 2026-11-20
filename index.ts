@@ -155,6 +155,7 @@ export class FeishuBot {
       ...(config.larkProfile === undefined ? {} : { profile: config.larkProfile }),
       cwd: config.cwd,
       timeoutMs: config.cliTimeoutMs,
+      chatListTtlMs: config.chatListTtlMs,
       dryRun: config.dryRun,
       logger: ctx.logger,
     })

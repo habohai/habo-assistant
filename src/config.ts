@@ -40,6 +40,8 @@ export interface Config {
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
   replyGuidelines: string
+  /** Chat-name cache TTL for lark-cli chat lists. */
+  chatListTtlMs: number
   maxConcurrent: number
   maxQueue: number
   cliTimeoutMs: number
@@ -67,6 +69,7 @@ export const DEFAULTS = {
   statsIntervalMs: 5 * 60 * 1000,
   approvalTimeoutMs: 2 * 60 * 1000,
   p2pSessionTtlMs: 30 * 24 * 60 * 60 * 1000,
+  chatListTtlMs: 5 * 60 * 1000,
 }
 
 /** `none`/`off` (any case) disables the acknowledgement reaction. */
@@ -123,6 +126,7 @@ export function normalizeConfig(raw: unknown): Config {
     autoEnableApproverChats: value.autoEnableApproverChats !== false && value.autoEnableOwnerChats !== false,
     approvalTimeoutMs: integer('approvalTimeoutMs', DEFAULTS.approvalTimeoutMs, 10_000, 30 * 60 * 1000),
     p2pSessionTtlMs: integer('p2pSessionTtlMs', DEFAULTS.p2pSessionTtlMs, 60_000, 365 * 24 * 60 * 60 * 1000),
+    chatListTtlMs: integer('chatListTtlMs', DEFAULTS.chatListTtlMs, 10_000, 24 * 60 * 60 * 1000),
     /** Approver open_ids; empty means any member of the chat may answer. */
     approveUsers: list('approveUsers'),
     stateDir: string('stateDir') || join(homedir(), '.dsh', 'feishu-bot'),

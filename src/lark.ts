@@ -15,7 +15,7 @@
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 64 * 1024
-const CHAT_LIST_TTL_MS = 5 * 60_000
+const DEFAULT_CHAT_LIST_TTL_MS = 5 * 60_000
 
 export interface ChatSummary {
   chatId: string
@@ -32,6 +32,7 @@ export interface LarkOptions {
   profile?: string
   cwd: string
   timeoutMs?: number
+  chatListTtlMs?: number
   dryRun?: boolean
   logger?: Pick<Logger, 'info' | 'debug' | 'warn'>
 }
@@ -57,6 +58,7 @@ export class LarkCli {
   private readonly profile?: string
   private readonly cwd: string
   private readonly timeoutMs: number
+  private readonly chatListTtlMs: number
   private readonly dryRun: boolean
   private readonly logger?: Pick<Logger, 'info' | 'debug' | 'warn'>
   private executable: string | undefined
@@ -67,12 +69,13 @@ export class LarkCli {
   private chatListAt: number
   private readonly peerNames: Map<string, string>
 
-  constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, dryRun = false, logger }: LarkOptions) {
+  constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, chatListTtlMs = DEFAULT_CHAT_LIST_TTL_MS, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
     this.name = name
     this.profile = profile
     this.cwd = cwd
     this.timeoutMs = timeoutMs
+    this.chatListTtlMs = chatListTtlMs
     this.dryRun = dryRun
     this.logger = logger
     this.executable = undefined
@@ -158,7 +161,7 @@ export class LarkCli {
    */
   async listChats(force = false): Promise<ChatSummary[]> {
     const now = Date.now()
-    if (!force && this.chatList !== undefined && now - this.chatListAt < CHAT_LIST_TTL_MS) return this.chatList
+    if (!force && this.chatList !== undefined && now - this.chatListAt < this.chatListTtlMs) return this.chatList
     const merged = new Map<string, ChatSummary>()
     for (const identity of ['bot', 'user'] as const) {
       try {

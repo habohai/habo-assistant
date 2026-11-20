@@ -64,6 +64,8 @@ export class BindingRegistry {
   /** (botId, chatId) -> history, newest first. */
   private readonly historyByChat: Map<string, BindingRecord[]>
   private readonly suppressed: Set<string>
+  private writes: Promise<void>
+  private appends: number
   readonly ready: Promise<void>
 
   constructor(dir: string, botId = 'default') {
@@ -74,6 +76,8 @@ export class BindingRegistry {
     this.candidates = new Map()
     this.historyByChat = new Map()
     this.suppressed = new Set()
+    this.writes = Promise.resolve()
+    this.appends = 0
     this.ready = this.load()
   }
 
@@ -271,6 +275,7 @@ export class BindingRegistry {
 
   /** Rewrite the journal from in-memory state, dropping superseded/torn records. */
   async compact(): Promise<void> {
+    const rewrite = async (): Promise<void> => {
     const records: BindingRecord[] = []
     const seenActive = new Set<string>()
     for (const list of this.historyByChat.values()) {
@@ -296,11 +301,20 @@ export class BindingRegistry {
     const temp = `${this.file}.${process.pid}.tmp`
     await writeFile(temp, records.map(record => JSON.stringify(record)).join('\n') + (records.length === 0 ? '' : '\n'), 'utf8')
     await rename(temp, this.file)
+    }
+    this.writes = this.writes.catch(() => {}).then(rewrite)
+    await this.writes
+    this.appends = 0
   }
 
   private async append(record: BindingRecord): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true })
-    await appendFile(this.file, `${JSON.stringify(record)}\n`, 'utf8')
+    this.writes = this.writes.catch(() => {}).then(async () => {
+      await mkdir(dirname(this.file), { recursive: true })
+      await appendFile(this.file, `${JSON.stringify(record)}\n`, 'utf8')
+    })
+    await this.writes
+    this.appends += 1
+    if (this.appends >= 500) await this.compact()
   }
 
   async bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now(), botId = this.botId): Promise<BindingRecord> {
