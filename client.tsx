@@ -239,7 +239,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 2px; padding: 1px 7px 1px 6px; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .18)); border-radius: 999px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
         .ft-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
-        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); animation: ft-breathe 5.2s ease-in-out infinite; will-change: opacity, transform; }
+        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); animation: ft-breathe 7.2s ease-in-out infinite; will-change: opacity, transform; }
         .ft-conn.connecting .ft-live-dot { background: var(--dsw-alias-state-warning-primary, #D97706); animation: ft-live 1.6s ease-in-out infinite; }
         .ft-conn.offline .ft-live-dot { background: var(--dsw-alias-state-error-primary, #E5484D); }
         @keyframes ft-live { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
