@@ -131,13 +131,21 @@ export function useFeishuStatus(
   return { data, loading, error, reload: () => setNonce(value => value + 1) }
 }
 
-/** Poll the bot health endpoint for the task page's connection light. */
-export function useFeishuConnection(React: typeof ReactNS): ConnectionState {
+/** Poll status for the task page's connection light and current binding set. */
+export function useFeishuConnection(React: typeof ReactNS): {
+  connection: ConnectionState
+  boundSessions?: Set<string>
+} {
   const { data } = useFeishuStatus(React, { pollMs: 3000 })
-  if (data === undefined) return 'connecting'
-  return data.ready === true && data.consumer === true
-    ? 'ready'
-    : data.consumer === true ? 'connecting' : 'offline'
+  const connection: ConnectionState = data === undefined
+    ? 'connecting'
+    : data.ready === true && data.consumer === true
+      ? 'ready'
+      : data.consumer === true ? 'connecting' : 'offline'
+  return {
+    connection,
+    ...(data === undefined ? {} : { boundSessions: new Set(data.bindings.map(binding => binding.sessionId)) }),
+  }
 }
 
 export interface SessionTitleRow {

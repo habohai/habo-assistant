@@ -180,7 +180,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     t: TFunction
   }): ReactNS.ReactElement {
     const { t } = props
-    const connection = useFeishuConnection(React)
+    const { connection, boundSessions } = useFeishuConnection(React)
     const useSessions = props.useSessions as <T>(selector: (state: SessionsState) => T) => T
     const state = useSessions(snapshot => snapshot)
     React.useEffect(() => {
@@ -221,8 +221,12 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     }
     const rank = (task: TaskView): number => task.status === 'approval' ? 0 : task.status === 'running' ? 1 : 2
     items.sort((left, right) => rank(left.task) - rank(right.task) || right.task.updatedAt - left.task.updatedAt)
-    const running = items.filter(item => item.task.status === 'running').length
-    const approval = items.filter(item => item.task.status === 'approval').length
+    // A task without an active binding is an orphan (e.g. an old session whose
+    // p2p candidate was replaced); hide it so the task page and session-info
+    // page agree.
+    const visible = boundSessions === undefined ? items : items.filter(item => boundSessions.has(item.id))
+    const running = visible.filter(item => item.task.status === 'running').length
+    const approval = visible.filter(item => item.task.status === 'approval').length
     const now = Date.now()
 
     return <div className="ft-page" data-feishu-tasks="">
@@ -268,13 +272,13 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
           {t(connection === 'ready' ? 'connReady' : connection === 'connecting' ? 'connConnecting' : 'connOffline')}
         </span>
       </div>
-      {items.length === 0
+      {visible.length === 0
         ? <div className="ft-empty">
           <div className="ft-empty-title">{t('emptyTitle')}</div>
           <div className="ft-empty-hint">{t('emptyHint')}</div>
         </div>
         : <ul className="ft-list">
-          {items.map(({ id, row, task }) => <li key={id}>
+          {visible.map(({ id, row, task }) => <li key={id}>
             <button
               type="button"
               className="ft-row"
