@@ -252,9 +252,9 @@ test('allowChat persists a runtime-enabled group and bindChat points it at a ses
   const { bot, stateDir } = await createBot()
   try {
     assert.equal(await bot.allowChat('oc_runtime'), true)
-    assert.equal(bot.config.allowChats.includes('oc_runtime'), true)
-    const persisted = JSON.parse(await readFile(join(stateDir, 'dynamic-chats.json'), 'utf8'))
-    assert.deepEqual(persisted, ['oc_runtime'])
+    assert.equal(bot.chats.isAllowed('oc_runtime'), true)
+    const persisted = JSON.parse(await readFile(join(stateDir, 'chats.json'), 'utf8'))
+    assert.equal(typeof persisted.oc_runtime.allowedAt, 'number')
 
     bot.cli.chatInfo = async chatId => ({ chatId, name: 'Runtime group', botMember: true })
     await bot.bindChat('oc_runtime', 'ses_branch')

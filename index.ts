@@ -36,6 +36,7 @@ import { SeenStore } from './src/dedup.js'
 import { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
 import { LarkCli } from './src/lark.js'
 import { Metrics } from './src/metrics.js'
+import { ChatDirectory } from './src/chat-directory.js'
 import { artifactsProjection } from './src/artifacts-projection.js'
 import { taskProjection } from './src/task-projection.js'
 import { isStopCommand, sessionTitle, splitReply } from './src/text.js'
@@ -130,9 +131,8 @@ export class FeishuBot {
   private lastEventAt: number
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
-  /** Chats enabled at runtime by the bind tool, persisted separately from the profile. */
-  private readonly dynamicChats: Set<string>
-  private readonly dynamicChatsFile: string
+  /** Runtime chat admission; profile allowChats stays in config. */
+  private readonly chats: ChatDirectory
 
   constructor(ctx: HostContext, config: Config) {
     this.ctx = ctx
@@ -172,12 +172,11 @@ export class FeishuBot {
     this.lastEventAt = 0
     this.sessionLookup = new Map()
     this.digestCache = new Map()
-    this.dynamicChats = new Set()
-    this.dynamicChatsFile = join(config.stateDir, 'dynamic-chats.json')
+    this.chats = new ChatDirectory(config.stateDir)
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.registry.ready, this.seen.load(), this.loadDynamicChats()])
+    await Promise.all([this.registry.ready, this.chats.ready, this.seen.load()])
     if (this.stopping) return
     const problem = configProblem(this.config)
     if (problem !== undefined) {
@@ -577,7 +576,7 @@ export class FeishuBot {
       lastEventAt: this.lastEventAt,
       approvals: this.approvals.size,
       bindings: this.registry.entries().length,
-      dynamicChats: this.dynamicChats.size,
+      dynamicChats: this.chats.size,
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
       bot: {
@@ -699,7 +698,7 @@ export class FeishuBot {
 
   /** Static allowlist or a chat enabled at runtime. */
   private isAllowedChat(chatId: string): boolean {
-    return this.config.allowChats.includes('*') || this.config.allowChats.includes(chatId)
+    return this.config.allowChats.includes('*') || this.config.allowChats.includes(chatId) || this.chats.isAllowed(chatId)
   }
 
   /** Only the configured owner may enable an unknown group by @-ing the bot. */
@@ -715,7 +714,7 @@ export class FeishuBot {
 
   /** Whether a chat is allowed to control (stop) work it may have started. */
   canControl(chatId: string): boolean {
-    if (this.config.allowChats.includes('*') || this.config.allowChats.includes(chatId)) return true
+    if (this.isAllowedChat(chatId)) return true
     if (this.approvals.has(chatId)) return true
     return this.registry.entries().some(([key]) => key === chatId || key.startsWith(`${chatId}::`))
   }
@@ -876,46 +875,15 @@ export class FeishuBot {
     }
   }
 
-  /** Load chats enabled by the bind tool from the previous process. */
-  private async loadDynamicChats(): Promise<void> {
-    let raw: string
-    try {
-      raw = await readFile(this.dynamicChatsFile, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.ctx.logger.warn(`feishu-bot: cannot read ${this.dynamicChatsFile}: ${String(error)}`)
-      }
-      return
-    }
-    try {
-      const parsed = JSON.parse(raw) as unknown
-      if (!Array.isArray(parsed)) return
-      for (const value of parsed) {
-        if (typeof value !== 'string' || !value.startsWith('oc_')) continue
-        this.dynamicChats.add(value)
-        if (!this.config.allowChats.includes(value)) this.config.allowChats.push(value)
-      }
-    } catch (error) {
-      this.ctx.logger.warn(`feishu-bot: invalid ${this.dynamicChatsFile}: ${String(error)}`)
-    }
-  }
-
-  /** Allow one chat at runtime and remember it across restarts. */
+  /** Persist a runtime-enabled chat in the unified directory. */
   async allowChat(chatId: string): Promise<boolean> {
     const id = chatId.trim()
     if (!/^oc_[A-Za-z0-9]+$/.test(id)) throw new Error('chat_id must be a Feishu group id (oc_...)')
-    if (this.config.allowChats.includes('*') || this.config.allowChats.includes(id)) return false
-    this.config.allowChats.push(id)
-    this.dynamicChats.add(id)
-    await mkdir(this.config.stateDir, { recursive: true })
-    const temp = `${this.dynamicChatsFile}.${process.pid}.tmp`
-    await writeFile(temp, JSON.stringify([...this.dynamicChats], null, 2), 'utf8')
-    await rename(temp, this.dynamicChatsFile)
+    await this.chats.allow(id)
     this.ctx.logger.info(`feishu-bot: allowed chat ${id} at runtime`)
     return true
   }
 
-  /** Point one chat at an existing Session (current or forked). */
   /** A chat is bindable only when the bot itself is a member. */
   async assertBindableChat(chatId: string): Promise<void> {
     const info = await this.cli.chatInfo(chatId, true)

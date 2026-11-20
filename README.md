@@ -53,7 +53,7 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 - 绑定、历史、出站亲和、解绑抑制都从同一份 journal 推导，不再各写一个文件；
 - 每条记录带 `botId`（当前取 `botOpenId`/`botName`），为未来多 bot 预留；运行时目前仍是单 bot。
 
-去重日志仍在 `seen.jsonl`，群白名单位于 `dynamic-chats.json`。
+去重日志仍在 `seen.jsonl`；运行时群准入统一在 `chats.json`（旧的 `dynamic-chats.json` 首次加载时自动迁移）。
 
 ## API
 
