@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 
 interface ChatEntry {
   allowedAt: number
+  kind?: 'group' | 'p2p'
 }
 
 export class ChatDirectory {
@@ -29,8 +30,11 @@ export class ChatDirectory {
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
         for (const [chatId, value] of Object.entries(parsed)) {
           if (!chatId.startsWith('oc_')) continue
-          const record = value as { allowedAt?: unknown }
-          this.runtime.set(chatId, { allowedAt: typeof record.allowedAt === 'number' ? record.allowedAt : 0 })
+          const record = value as { allowedAt?: unknown; kind?: unknown }
+          this.runtime.set(chatId, {
+            allowedAt: typeof record.allowedAt === 'number' ? record.allowedAt : 0,
+            ...(record.kind === 'p2p' || record.kind === 'group' ? { kind: record.kind } : {}),
+          })
         }
       }
       return
@@ -62,9 +66,13 @@ export class ChatDirectory {
     return this.runtime.has(chatId)
   }
 
-  async allow(chatId: string, at = Date.now()): Promise<void> {
-    this.runtime.set(chatId, { allowedAt: at })
+  async allow(chatId: string, at = Date.now(), kind: 'group' | 'p2p' = 'group'): Promise<void> {
+    this.runtime.set(chatId, { allowedAt: at, kind })
     await this.flush()
+  }
+
+  kind(chatId: string): 'group' | 'p2p' | undefined {
+    return this.runtime.get(chatId)?.kind
   }
 
   get size(): number {

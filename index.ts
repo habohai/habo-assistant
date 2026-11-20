@@ -366,11 +366,11 @@ export class FeishuBot {
       // The owner's first @ enables the group without editing the profile.
       this.metrics.inc('chatEnabled')
       this.ctx.logger.info(`feishu-bot: owner enabled chat ${event.chatId}`)
-      void this.allowChat(event.chatId).catch(error => {
+      void this.allowChat(event.chatId, event.chatType === 'p2p' ? 'p2p' : 'group').catch(error => {
         this.ctx.logger.warn(`feishu-bot: cannot persist enabled chat ${event.chatId}: ${String(error)}`)
       })
     }
-    if (!acceptEvent(event, this.config, this.routing)) {
+    if (!acceptEvent(event, this.config, this.routing, true)) {
       this.metrics.inc('ignored')
       this.ctx.logger.debug(`feishu-bot: ignore chat=${event.chatId} type=${event.messageType}`)
       return
@@ -603,6 +603,7 @@ export class FeishuBot {
       if (record.sessionId === undefined) return []
       const chatId = key.split('::')[0]
       const info = byId.get(chatId)
+      const p2p = info === undefined && this.chats.kind(chatId) === 'p2p'
       return [{
         chatId,
         botId: record.botId,
@@ -610,7 +611,7 @@ export class FeishuBot {
         source: record.source,
         boundAt: record.at,
         ...(info === undefined || info.name === '' ? {} : { chatName: info.name }),
-        botMember: info?.botMember === true,
+        botMember: info?.botMember === true || p2p,
       }]
     })
   }
@@ -700,7 +701,7 @@ export class FeishuBot {
     return {
       chatId,
       ...(info === undefined || info.name === '' ? {} : { chatName: info.name }),
-      botMember: info?.botMember === true,
+      botMember: info?.botMember === true || (info === undefined && this.chats.kind(chatId) === 'p2p'),
       sessions: [...merged.values()].sort((left, right) => right.at - left.at),
     }
   }
@@ -713,10 +714,11 @@ export class FeishuBot {
   /** Only the configured owner may enable an unknown group by @-ing the bot. */
   private canEnableChat(event: FeishuEvent): boolean {
     if (!this.config.autoEnableApproverChats) return false
-    if (event.chatType !== 'group') return false
+    if (event.chatType !== 'group' && event.chatType !== 'p2p') return false
     if (event.senderType === 'app' || event.senderType === 'bot') return false
     if (event.messageType !== 'text' && event.messageType !== 'post') return false
     if (this.config.approveUsers.length === 0 || !this.config.approveUsers.includes(event.senderId)) return false
+    if (event.chatType === 'p2p') return true
     if (this.config.botOpenId !== undefined) return event.mentions.some(mention => mention.id === this.config.botOpenId)
     return event.mentions.length > 0
   }
@@ -885,17 +887,18 @@ export class FeishuBot {
   }
 
   /** Persist a runtime-enabled chat in the unified directory. */
-  async allowChat(chatId: string): Promise<boolean> {
+  async allowChat(chatId: string, kind: 'group' | 'p2p' = 'group'): Promise<boolean> {
     const id = chatId.trim()
     if (!/^oc_[A-Za-z0-9]+$/.test(id)) throw new Error('chat_id must be a Feishu group id (oc_...)')
-    await this.chats.allow(id)
-    this.ctx.logger.info(`feishu-bot: allowed chat ${id} at runtime`)
+    await this.chats.allow(id, Date.now(), kind)
+    this.ctx.logger.info(`feishu-bot: allowed ${kind} ${id} at runtime`)
     return true
   }
 
   /** A chat is bindable only when the bot itself is a member. */
   async assertBindableChat(chatId: string): Promise<void> {
     const info = await this.cli.chatInfo(chatId, true)
+    if (this.chats.kind(chatId) === 'p2p' && (info === undefined || !info.botMember)) return
     if (info === undefined) throw new Error('找不到该群，或机器人没有访问权限')
     if (!info.botMember) throw new Error('机器人不在该群，请先把机器人拉进群再绑定')
   }
@@ -1325,7 +1328,7 @@ export class BotHost {
     await this.pick(botId).assertBindableChat(chatId)
   }
 
-  async allowChat(chatId: string): Promise<boolean> {
+  async allowChat(chatId: string, kind: 'group' | 'p2p' = 'group'): Promise<boolean> {
     return this.primary.allowChat(chatId)
   }
 

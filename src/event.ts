@@ -80,12 +80,15 @@ export function acceptEvent(
   event: FeishuEvent | undefined,
   config: { allowChats: string[]; botOpenId?: string },
   routing: 'chat' | 'thread',
+  alreadyAllowed = false,
 ): boolean {
   if (event === undefined) return false
-  if (event.chatType !== 'group') return false
+  if (event.chatType !== 'group' && event.chatType !== 'p2p') return false
   if (event.senderType === 'app' || event.senderType === 'bot') return false
   if (event.messageType !== 'text' && event.messageType !== 'post') return false
-  if (!config.allowChats.includes('*') && !config.allowChats.includes(event.chatId)) return false
+  if (!alreadyAllowed && !config.allowChats.includes('*') && !config.allowChats.includes(event.chatId)) return false
+  // A direct chat has no @ mention; the chat itself is the address.
+  if (event.chatType === 'p2p') return true
   if (config.botOpenId !== undefined) {
     return event.mentions.some(mention => mention.id === config.botOpenId)
   }

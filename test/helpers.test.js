@@ -62,7 +62,9 @@ test('acceptEvent filters chats, senders, and types', () => {
     senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: 'hi',
   }
   assert.equal(acceptEvent(base, config, 'chat'), true)
-  assert.equal(acceptEvent({ ...base, chatType: 'p2p' }, config, 'chat'), false)
+  assert.equal(acceptEvent({ ...base, chatType: 'p2p' }, config, 'chat'), true)
+  assert.equal(acceptEvent({ ...base, chatType: 'p2p', mentions: [] }, config, 'chat'), true)
+  assert.equal(acceptEvent({ ...base, chatType: 'p2p', chatId: 'oc_other' }, config, 'chat'), false)
   assert.equal(acceptEvent({ ...base, senderType: 'app' }, config, 'chat'), false)
   assert.equal(acceptEvent({ ...base, senderType: 'bot' }, config, 'chat'), false)
   assert.equal(acceptEvent({ ...base, messageType: 'image' }, config, 'chat'), false)
