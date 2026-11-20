@@ -463,3 +463,49 @@ test('outbound claim requires the owner in the group when ownerUnionId is set', 
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+
+test('outbound reply-in-thread claims the topic, not the group main session', async () => {
+  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.cli.messageContext = async () => ({ chatId: 'oc_1', threadId: 'omt_topic' })
+    bot.observeOutboundChat('ses_topic', {
+      type: 'tool/call',
+      data: {
+        name: 'bash',
+        arguments: JSON.stringify({ command: 'lark-cli im +messages-reply --message-id om_root --reply-in-thread --as bot --text hi' }),
+      },
+    })
+    await waitFor(() => bot.registry.get('oc_1::omt_topic')?.sessionId === 'ses_topic')
+    assert.equal(bot.registry.get('oc_1'), undefined)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('approval prompt and note reply inside the triggering topic', async () => {
+  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  try {
+    const calls = []
+    bot.cli.reply = async (messageId, text, options) => {
+      calls.push({ messageId, text, inThread: options?.inThread })
+      return 'om_sent'
+    }
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: 'omt_topic', messageId: 'om_1' })
+    const pending = bot.askFeishuApproval({ chatId: 'oc_1', sessionId: 'ses_1', request: { reason: 'test' } })
+    await waitFor(() => calls.length === 1)
+    assert.equal(calls[0].messageId, 'om_1')
+    assert.equal(calls[0].inThread, true)
+    bot.settleApproval('oc_1', 'cancelled', 'cancelled')
+    const outcome = await pending
+    assert.equal(outcome, 'cancelled')
+    await waitFor(() => calls.length === 2)
+    assert.equal(calls[1].inThread, true)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

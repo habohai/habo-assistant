@@ -101,6 +101,8 @@ interface ApprovalRequest {
 interface ApprovalEntry {
   chatId: string
   sessionId: string
+  messageId?: string
+  threadId: string
   resolve(outcome: ApprovalOutcome): void
   timer?: NodeJS.Timeout
   signal?: AbortSignal
@@ -131,6 +133,8 @@ export class FeishuBot {
   private readonly botSessions: Set<string>
   /** sessionId -> chatId, so an approval can be asked in the right chat. */
   private readonly sessionChats: Map<string, Set<string>>
+  /** Latest trigger context per session, so approvals can stay in its topic. */
+  private readonly sessionContexts: Map<string, { chatId: string; threadId: string; messageId: string }>
   /** chatId -> pending approval entry (at most one per chat). */
   readonly approvals: Map<string, ApprovalEntry>
   /** Filled by the startup probe: only newer lark-cli builds can edit a sent message. */
@@ -181,6 +185,7 @@ export class FeishuBot {
     this.lastStatsSignature = ''
     this.botSessions = new Set()
     this.sessionChats = new Map()
+    this.sessionContexts = new Map()
     this.approvals = new Map()
     this.canEdit = false
     this.reactionFailures = 0
@@ -528,9 +533,12 @@ export class FeishuBot {
     const seconds = Math.round(this.config.approvalTimeoutMs / 1000)
     const prompt = `⚠️ 需要审批\n${reason}\n\n回复「@我 同意」执行，「@我 拒绝」取消（仅限指定审批人，${seconds} 秒内有效）`
     this.metrics.inc('approvalAsked')
+    const context = this.sessionContexts.get(sessionId)
+    const messageId = context?.messageId
+    const threadId = context?.threadId ?? ''
     this.ctx.logger.info(`feishu-bot: approval requested chat=${chatId} session=${sessionId}`)
     return new Promise<ApprovalOutcome>(resolve => {
-      const entry: ApprovalEntry = { chatId, sessionId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
+      const entry: ApprovalEntry = { chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
       this.approvals.set(chatId, entry)
       entry.timer = setTimeout(() => {
         this.settleApproval(chatId, 'unavailable', '⏰ 审批超时，该命令没有执行。')
@@ -542,7 +550,10 @@ export class FeishuBot {
         entry.onAbort = onAbort
         signal.addEventListener('abort', onAbort, { once: true })
       }
-      void this.cli.send(chatId, prompt).catch(error => {
+      const ask = messageId === undefined
+        ? this.cli.send(chatId, prompt)
+        : this.cli.reply(messageId, prompt, { inThread: threadId !== '', keySuffix: 'approval' })
+      void ask.catch(error => {
         this.ctx.logger.warn(`feishu-bot: cannot ask for approval in ${chatId}: ${String(error)}`)
         this.settleApproval(chatId, 'unavailable')
       })
@@ -558,7 +569,10 @@ export class FeishuBot {
     if (entry.onAbort !== undefined) entry.signal?.removeEventListener?.('abort', entry.onAbort)
     entry.resolve(outcome)
     if (note !== undefined && !this.stopping) {
-      this.cli.send(chatId, note).catch(error => {
+      const reply = entry.messageId === undefined
+        ? this.cli.send(chatId, note)
+        : this.cli.reply(entry.messageId, note, { inThread: entry.threadId !== '', keySuffix: 'approval-note' })
+      reply.catch(error => {
         this.ctx.logger.warn(`feishu-bot: approval note failed: ${String(error)}`)
       })
     }
@@ -582,7 +596,7 @@ export class FeishuBot {
       const value = raw as { command?: unknown }
       if (typeof value.command === 'string') command = value.command
     }
-    if (command === '' || !command.includes('lark-cli') || !command.includes('+messages-send')) return
+    if (command === '' || !command.includes('lark-cli')) return
     const profile = /(?:^|\s)--profile(?:\s+|=)([^\s]+)/.exec(command)?.[1]
     if (profile !== undefined) {
       if (profile !== this.config.larkProfile) return
@@ -591,16 +605,35 @@ export class FeishuBot {
       return
     }
     if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return
-    const match = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)
-    if (match === null) return
-    void this.claimOutbound(match[1] as string, sessionId, typeof event.time === 'number' ? event.time : Date.now())
+    const at = typeof event.time === 'number' ? event.time : Date.now()
+    if (command.includes('+messages-send')) {
+      const match = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)
+      if (match === null) return
+      void this.claimOutbound(match[1] as string, '', sessionId, at)
+      return
+    }
+    if (command.includes('+messages-reply') && /(?:^|\s)--reply-in-thread\b/.test(command)) {
+      const messageId = /--message-id(?:\s+|=)(om_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (messageId === undefined) return
+      void this.claimOutboundReply(messageId, sessionId, at)
+    }
+  }
+
+  private async claimOutboundReply(messageId: string, sessionId: string, at: number): Promise<void> {
+    try {
+      const context = await this.cli.messageContext(messageId)
+      if (context === undefined || context.threadId === '') return
+      await this.claimOutbound(context.chatId, context.threadId, sessionId, at)
+    } catch (error) {
+      this.ctx.logger.warn(`feishu-bot: cannot resolve outbound topic for ${messageId}: ${String(error)}`)
+    }
   }
 
   /**
    * A bot message sent from a Session claims the conversation: the conversation
    * binds to that Session, and the sending bot is lazily granted.
    */
-  private async claimOutbound(chatId: string, sessionId: string, at: number): Promise<void> {
+  private async claimOutbound(chatId: string, threadId: string, sessionId: string, at: number): Promise<void> {
     try {
       const info = await this.cli.chatInfo(chatId)
       if (info?.botMember !== true) return
@@ -617,11 +650,11 @@ export class FeishuBot {
           this.ctx.logger.warn(`feishu-bot: cannot verify owner membership in ${chatId}: ${String(error)}`)
         }
       }
-      const key = bindingKey(chatId, '', this.routing)
+      const key = bindingKey(chatId, threadId, this.routing)
       const current = this.registry.get(key)
       if (current?.sessionId !== sessionId || !this.registry.hasGrant(key)) {
         await this.setBinding(key, sessionId, 'outbound')
-        this.ctx.logger.info(`feishu-bot: outbound claim ${chatId} -> ${sessionId} via ${this.config.botName}`)
+        this.ctx.logger.info(`feishu-bot: outbound claim ${key} -> ${sessionId} via ${this.config.botName}`)
       }
       await this.recordChatAffinity(chatId, sessionId, at)
       this.trackSession(sessionId, chatId)
@@ -855,6 +888,7 @@ export class FeishuBot {
     let sessionId
     try {
       sessionId = await this.ensureSession(key, event, text)
+      this.sessionContexts.set(sessionId, { chatId: event.chatId, threadId: typeof event.threadId === 'string' ? event.threadId : '', messageId: event.messageId })
     } catch (error) {
       this.metrics.inc('jobsFailed')
       this.ctx.logger.error(`feishu-bot: cannot open session for ${key}: ${String(error)}`)

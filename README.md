@@ -66,6 +66,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 `routing: topic` 时，带 `thread_id` 的消息按话题建独立 session，回复自动在话题内；`root_id` 回复线程仍回退到群主会话。
 
+从 session 用 `+messages-reply --reply-in-thread` 往话题发消息，也会按 `(chatId, threadId)` 认领话题；话题内的审批提示和审批结果也会回复在原话题里。
+
 `ownerUnionId` 用于发消息认领时校验 owner 是否在群内；群成员接口无权限时会降级为“bot 在群”的校验并记录 warning。
 
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。

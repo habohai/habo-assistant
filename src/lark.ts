@@ -229,6 +229,23 @@ export class LarkCli {
     return chats.find(chat => chat.chatId === chatId)?.name ?? this.chatNames.get(chatId)
   }
 
+  /** Resolve the chat/topic context of one message (used for reply-to-topic claims). */
+  async messageContext(messageId: string): Promise<{ chatId: string; threadId: string } | undefined> {
+    const { stdout } = await this.run([
+      'im', '+messages-mget',
+      '--message-ids', messageId,
+      '--as', 'bot',
+      '--json',
+    ])
+    const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
+    const message = parsed.data?.messages?.[0]
+    if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
+    return {
+      chatId: message.chat_id,
+      threadId: typeof message.thread_id === 'string' ? message.thread_id : '',
+    }
+  }
+
   /** Union ids of the users in a group (stable across bot apps). */
   async chatMemberUnionIds(chatId: string): Promise<Set<string>> {
     let lastError: unknown
