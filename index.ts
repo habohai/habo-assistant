@@ -78,6 +78,7 @@ export interface BotServices {
   registry?: BindingRegistry
   seen?: SeenStore
   chats?: ChatDirectory
+  botNames?: ReadonlyMap<string, string>
 }
 
 interface PendingTurn {
@@ -139,6 +140,7 @@ export class FeishuBot {
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
   private readonly privateTitles: Map<string, string>
+  private readonly botNames: ReadonlyMap<string, string>
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
 
@@ -184,6 +186,7 @@ export class FeishuBot {
     this.sessionLookup = new Map()
     this.digestCache = new Map()
     this.privateTitles = new Map()
+    this.botNames = services.botNames ?? new Map([[botId, config.botName]])
     this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
 
@@ -1202,7 +1205,8 @@ export class FeishuBot {
       pending.timer.unref?.()
       this.pending.set(sessionId, pending)
       const peers = this.registry.peersForChat(event.chatId)
-      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peers.length}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}`
+      const peerNames = peers.map(id => this.botNames.get(id) ?? id)
+      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peerNames.join('、')}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}`
       const header = groupName === undefined || groupName === ''
         ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
         : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
@@ -1465,6 +1469,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   const sharedRegistry = new BindingRegistry(base.stateDir, base.bots[0]?.id ?? base.botId)
   const sharedSeen = new SeenStore(join(base.stateDir, 'seen.jsonl'), { logger: ctx.logger })
   const sharedChats = new ChatDirectory(base.stateDir)
+  const botNames = new Map(base.bots.map(bot => [bot.id, bot.name]))
   const bots = base.bots.map(bot => new FeishuBot(ctx, {
     ...base,
     botId: bot.id,
@@ -1474,7 +1479,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     allowChats: bot.allowChats,
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
-  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats }))
+  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames }))
   const host = new BotHost(ctx, base, bots)
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
