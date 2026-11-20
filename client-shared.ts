@@ -17,6 +17,7 @@ export interface ApiEnvelope<T> {
 
 export interface FeishuBinding {
   chatId: string
+  botId?: string
   sessionId: string
   chatName?: string
   botMember?: boolean
@@ -50,6 +51,7 @@ export interface FeishuStatus {
   ready?: boolean
   consumer?: boolean
   bindings: FeishuBinding[]
+  bots?: Array<{ id: string; name: string; ready?: boolean; consumer?: boolean }>
   bot?: { name?: string; openId?: string }
 }
 

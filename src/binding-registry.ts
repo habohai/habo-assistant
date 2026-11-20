@@ -300,3 +300,51 @@ export class BindingRegistry {
   }
 
 }
+
+/** One bot's view over the shared journal. */
+export class BotBindings {
+  constructor(
+    private readonly registry: BindingRegistry,
+    readonly botId: string,
+  ) {}
+
+  get ready(): Promise<void> {
+    return this.registry.ready
+  }
+
+  get(key: string): BindingRecord | undefined {
+    return this.registry.get(key, this.botId)
+  }
+
+  resolve(chatId: string, threadId: string, routing: 'chat' | 'thread'): BindingResolution {
+    return this.registry.resolve(chatId, threadId, routing, this.botId)
+  }
+
+  entries(): Array<[string, BindingRecord]> {
+    return this.registry.entries().filter(([, record]) => record.botId === this.botId)
+  }
+
+  listByChat(chatId: string, includeCandidates = false): BindingRecord[] {
+    return this.registry.listByChat(chatId, includeCandidates, this.botId)
+  }
+
+  candidateFor(chatId: string): BindingRecord | undefined {
+    return this.registry.candidateFor(chatId, this.botId)
+  }
+
+  isSuppressed(chatId: string): boolean {
+    return this.registry.isSuppressed(chatId, this.botId)
+  }
+
+  bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now()): Promise<BindingRecord> {
+    return this.registry.bind(chatId, threadId, sessionId, source, at, this.botId)
+  }
+
+  unbind(chatId: string, threadId: string, at = Date.now()): Promise<void> {
+    return this.registry.unbind(chatId, threadId, at, this.botId)
+  }
+
+  recordCandidate(chatId: string, sessionId: string, at = Date.now()): Promise<void> {
+    return this.registry.recordCandidate(chatId, sessionId, at, this.botId)
+  }
+}

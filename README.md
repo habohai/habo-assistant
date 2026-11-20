@@ -56,6 +56,28 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 去重日志仍在 `seen.jsonl`；运行时群准入统一在 `chats.json`（旧的 `dynamic-chats.json` 首次加载时自动迁移）。
 
+## 多 bot
+
+`bots` 数组可选；不写就是一个主 bot。每个 bot 用独立 lark-cli profile，共享绑定/准入状态：
+
+```yaml
+bots:
+  - id: bot-a
+    name: 飞书机器人 A
+    profile: cli_xxx
+    openId: ou_xxx
+  - id: bot-b
+    name: 飞书机器人 B
+    profile: cli_yyy
+    openId: ou_yyy
+```
+
+- 每个 bot 独立 consumer、LarkCli、队列、审批上下文；
+- 绑定按 `(botId, chat/thread)` 隔离；
+- 会话信息页有 bot 选择器，API 支持 `botId`，`feishu_bind_chat` 支持 `bot` 参数；
+- 多 bot 时每个 bot 必须有不同 `profile`，否则启动前校验失败；
+- 当前默认仍是单 bot，未配置 `bots` 不改变行为。
+
 ## API
 
 `/feishu-bot/api` 路径保持不变（会话信息页在用）：

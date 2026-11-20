@@ -233,6 +233,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.manual': '手动输入群 ID',
       'feishu.manualPlaceholder': 'oc_...',
       'feishu.bindAction': '绑定',
+      'feishu.botLabel': '机器人',
       'feishu.bound': '已绑定',
       'feishu.botMissing': '机器人不在群',
       'feishu.botMissingHint': '机器人不在该群，先把机器人拉进群才能接收 @ 消息',
@@ -310,6 +311,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.manual': 'Enter a chat ID manually',
       'feishu.manualPlaceholder': 'oc_...',
       'feishu.bindAction': 'Bind',
+      'feishu.botLabel': 'Bot',
       'feishu.bound': 'Bound',
       'feishu.botMissing': 'Bot not in group',
       'feishu.botMissingHint': 'The bot is not a member; add it to the group before binding',
@@ -402,6 +404,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-input { box-sizing: border-box; width: 100%; height: 36px; padding: 0 12px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: var(--dsw-radius-md, 8px); outline: none; background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; }
 .sa-input::placeholder { color: var(--dsw-alias-label-quaternary); }
 .sa-input:focus { border-color: var(--dsw-alias-state-business-primary); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-state-business-primary); }
+.sa-bot-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.sa-bot-picker .sa-input { flex: 1; }
 .sa-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; min-height: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .sa-chat { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 7px 8px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
 @media (hover: hover) { .sa-chat:hover { background: var(--dsw-alias-interactive-bg-hover); } }
@@ -949,7 +953,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       actionError: string
       onBind: () => void
       onOpenGroup: (binding: FeishuBinding) => void
-      onUnbind: (chatId: string) => void
+      onUnbind: (chatId: string, botId?: string) => void
       onReload: () => void
       t: TFunction
     }
@@ -990,7 +994,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               ? h('div', { className: 'sa-feishu-empty' }, t('feishu.empty'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.emptyHint')))
               : h('div', null, bound.map(binding => h('div', {
                 className: 'sa-feishu-row',
-                key: binding.chatId,
+                key: `${binding.botId ?? ''}:${binding.chatId}`,
                 role: 'button',
                 tabIndex: 0,
                 title: t('feishu.groupHint'),
@@ -1016,7 +1020,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   'aria-label': t('feishu.unbind'),
                   onClick: (event: { stopPropagation(): void }) => {
                     event.stopPropagation()
-                    onUnbind(binding.chatId)
+                    onUnbind(binding.chatId, binding.botId)
                   },
                 }, t('feishu.unbind')),
                 h('span', { className: 'sa-feishu-chevron', 'aria-hidden': true }, '›'),
@@ -1028,6 +1032,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     interface BindDialogProps {
       open: boolean
       chats: FeishuChat[]
+      bots: Array<{ id: string; name: string }>
+      botId: string
+      onBotChange: (botId: string) => void
       loading: boolean
       error: string
       busy: boolean
@@ -1038,7 +1045,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     }
 
     /** Modal picker: search visible groups or paste a chat id. */
-    function BindDialog({ open, chats, loading, error, busy, onClose, onRefresh, onBind, t }: BindDialogProps) {
+    function BindDialog({ open, chats, bots, botId, onBotChange, loading, error, busy, onClose, onRefresh, onBind, t }: BindDialogProps) {
       const [query, setQuery] = useState('')
       const [selected, setSelected] = useState('')
       const [manual, setManual] = useState('')
@@ -1089,6 +1096,16 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           ),
           h('div', { className: 'sa-dialog-desc' }, t('feishu.bindHint')),
           h('div', { className: 'sa-dialog-body' },
+            bots.length > 1
+              ? h('label', { className: 'sa-bot-picker' },
+                h('span', null, t('feishu.botLabel')),
+                h('select', {
+                  className: 'sa-input',
+                  value: botId,
+                  onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
+                }, bots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
+              )
+              : null,
             h('input', {
               className: 'sa-input',
               value: query,
@@ -1180,7 +1197,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       error: string
       busy: boolean
       onClose: () => void
-      onUnbind: (chatId: string) => void
+      onUnbind: (chatId: string, botId?: string) => void
       sessionTitle: (sessionId: string) => string
       t: TFunction
     }
@@ -1281,6 +1298,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const [chatsLoading, setChatsLoading] = useState(false)
       const [chatsError, setChatsError] = useState('')
       const [binding, setBinding] = useState(false)
+      const [botId, setBotId] = useState('')
+      const bots = feishu.data?.bots ?? []
+      useEffect(() => {
+        if (botId === '' && bots.length > 0) setBotId(bots[0].id)
+      }, [botId, bots])
       const [actionError, setActionError] = useState('')
       const [groupOpen, setGroupOpen] = useState(false)
       const [group, setGroup] = useState<FeishuGroupDetail | undefined>(undefined)
@@ -1310,7 +1332,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'bind', chatId, sessionId }),
+          body: JSON.stringify({ action: 'bind', chatId, sessionId, botId }),
         })
           .then(() => {
             setBindOpen(false)
@@ -1319,12 +1341,12 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           .catch(reason => { setActionError(reason instanceof Error ? reason.message : String(reason)) })
           .finally(() => { setBinding(false) })
       }
-      const unbindChat = (chatId: string): void => {
+      const unbindChat = (chatId: string, botId?: string): void => {
         setActionError('')
         fetchFeishuApi<FeishuStatus>(FEISHU_API, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'unbind', chatId }),
+          body: JSON.stringify({ action: 'unbind', chatId, botId }),
         })
           .then(() => {
             setGroupOpen(false)
@@ -1360,6 +1382,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const bindDialog = h(BindDialog, {
         open: bindOpen,
         chats,
+        bots,
+        botId,
+        onBotChange: setBotId,
         loading: chatsLoading,
         error: chatsError === '' ? actionError : chatsError,
         busy: binding,

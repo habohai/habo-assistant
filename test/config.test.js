@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DEFAULTS } from '../lib/index.js'
-import { Metrics, normalizeConfig, parseMessageId, percentile } from '../lib/index.js'
+import { Metrics, configProblem, normalizeConfig, parseMessageId, percentile } from '../lib/index.js'
 
 test('normalizeConfig keeps documented defaults', () => {
   const config = normalizeConfig({})
@@ -14,6 +14,19 @@ test('normalizeConfig keeps documented defaults', () => {
   assert.equal(config.workspaceId, undefined)
   assert.equal(config.larkProfile, undefined)
   assert.equal(normalizeConfig({ larkProfile: ' bot-a ' }).larkProfile, 'bot-a')
+  const multi = normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], bots: [
+    { id: 'a', name: 'A', profile: 'p1' },
+    { id: 'b', name: 'B', profile: 'p2', allowChats: ['oc_2'] },
+  ] })
+  assert.equal(multi.bots.length, 2)
+  assert.equal(multi.bots[0].id, 'a')
+  assert.equal(multi.bots[0].profile, 'p1')
+  assert.deepEqual(multi.bots[0].allowChats, ['oc_1'])
+  assert.deepEqual(multi.bots[1].allowChats, ['oc_2'])
+  const noProfile = normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], bots: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] })
+  assert.match(configProblem(noProfile) ?? '', /larkProfile/)
+  const duplicate = normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], bots: [{ id: 'a', name: 'A', profile: 'p' }, { id: 'b', name: 'B', profile: 'p' }] })
+  assert.match(configProblem(duplicate) ?? '', /duplicate larkProfile/)
   assert.equal(config.permissionPreset, '')
   assert.equal(normalizeConfig({ workspaceId: 'w1' }).workspaceId, 'w1')
   assert.equal(config.approvalTimeoutMs, 120_000)

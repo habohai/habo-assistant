@@ -8,6 +8,16 @@
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 
+export interface BotConfig {
+  id: string
+  name: string
+  profile?: string
+  openId?: string
+  allowChats: string[]
+  approveUsers: string[]
+  permissionPreset: string
+}
+
 /** Normalized plugin configuration. */
 export interface Config {
   larkCli: string
@@ -16,8 +26,11 @@ export interface Config {
   cwd: string
   workspaceId?: string
   allowChats: string[]
+  botId: string
   botOpenId?: string
   botName: string
+  /** One entry per Feishu bot app; empty input becomes a single inherited bot. */
+  bots: BotConfig[]
   agentPreset?: string
   routing: 'chat' | 'thread'
   replyInThread: boolean
@@ -75,7 +88,7 @@ export function normalizeConfig(raw: unknown): Config {
     ? value[key].filter((item): item is string => typeof item === 'string' && item.trim() !== '').map(item => item.trim())
     : fallback
   const chats = list('allowChats')
-  return {
+  const base: Config = {
     larkCli: string('larkCli', 'lark-cli'),
     larkProfile: string('larkProfile') || undefined,
     cwd: string('cwd'),
@@ -106,7 +119,41 @@ export function normalizeConfig(raw: unknown): Config {
     approveUsers: list('approveUsers'),
     stateDir: string('stateDir') || join(homedir(), '.dsh', 'feishu-bot'),
     dryRun: value.dryRun === true,
+    botId: string('botId') || string('botOpenId') || string('botName', '飞书机器人'),
+    bots: [],
   }
+  const rawBots = Array.isArray(value.bots) ? value.bots : []
+  base.bots = rawBots.length === 0
+    ? [{
+      id: base.botId,
+      name: base.botName,
+      ...(base.larkProfile === undefined ? {} : { profile: base.larkProfile }),
+      ...(base.botOpenId === undefined ? {} : { openId: base.botOpenId }),
+      allowChats: base.allowChats,
+      approveUsers: base.approveUsers,
+      permissionPreset: base.permissionPreset,
+    }]
+    : rawBots.map((item, index) => {
+      const bot = item !== null && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : {}
+      const name = typeof bot.name === 'string' && bot.name.trim() !== '' ? bot.name.trim() : `机器人 ${index + 1}`
+      const openId = typeof bot.openId === 'string' ? bot.openId.trim() : typeof bot.botOpenId === 'string' ? bot.botOpenId.trim() : base.botOpenId
+      const allowChats = Array.isArray(bot.allowChats)
+        ? bot.allowChats.filter((chat): chat is string => typeof chat === 'string' && chat.trim() !== '').map(chat => chat.trim())
+        : base.allowChats
+      const approveUsers = Array.isArray(bot.approveUsers)
+        ? bot.approveUsers.filter((user): user is string => typeof user === 'string' && user.trim() !== '').map(user => user.trim())
+        : base.approveUsers
+      return {
+        id: typeof bot.id === 'string' && bot.id.trim() !== '' ? bot.id.trim() : openId ?? name,
+        name,
+        ...(typeof bot.profile === 'string' && bot.profile.trim() !== '' ? { profile: bot.profile.trim() } : base.larkProfile === undefined ? {} : { profile: base.larkProfile }),
+        ...(openId === undefined ? {} : { openId }),
+        allowChats,
+        approveUsers,
+        permissionPreset: typeof bot.permissionPreset === 'string' ? bot.permissionPreset.trim() : base.permissionPreset,
+      }
+    })
+  return base
 }
 
 /**
@@ -116,6 +163,18 @@ export function normalizeConfig(raw: unknown): Config {
  */
 export function configProblem(config: Config): string | undefined {
   if (config.cwd === '') return 'cwd is required'
+  const ids = new Set<string>()
+  const profiles = new Set<string>()
+  for (const bot of config.bots) {
+    if (ids.has(bot.id)) return `duplicate bot id: ${bot.id}`
+    ids.add(bot.id)
+    const profile = bot.profile ?? ''
+    if (config.bots.length > 1 && profile === '') return `bot ${bot.id} needs a larkProfile when multiple bots are configured`
+    if (profile !== '') {
+      if (profiles.has(profile)) return `duplicate larkProfile: ${profile}`
+      profiles.add(profile)
+    }
+  }
   if (!isAbsolute(config.cwd)) return 'cwd must be an absolute path'
   if (config.allowChats.length === 0 && !(config.autoEnableApproverChats && config.approveUsers.length > 0)) {
     return 'allowChats is empty; the bot would refuse every chat'

@@ -30,7 +30,7 @@ import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
 import type { HostContext, Job, SessionEventLike, SessionLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
-import { BindingRegistry } from './src/binding-registry.js'
+import { BindingRegistry, BotBindings } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
 import { SeenStore } from './src/dedup.js'
 import { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
@@ -74,6 +74,12 @@ function firstNonEmpty(...values: unknown[]): string {
 
 type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
+export interface BotServices {
+  registry?: BindingRegistry
+  seen?: SeenStore
+  chats?: ChatDirectory
+}
+
 interface PendingTurn {
   chatId: string
   turn?: number
@@ -104,7 +110,7 @@ export class FeishuBot {
   readonly ctx: HostContext
   readonly config: Config
   private readonly routing: 'chat' | 'thread'
-  readonly registry: BindingRegistry
+  readonly registry: BotBindings
   readonly seen: SeenStore
   readonly metrics: Metrics
   private readonly cli: LarkCli
@@ -135,12 +141,13 @@ export class FeishuBot {
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
 
-  constructor(ctx: HostContext, config: Config) {
+  constructor(ctx: HostContext, config: Config, services: BotServices = {}) {
     this.ctx = ctx
     this.config = config
     this.routing = config.routing
-    this.registry = new BindingRegistry(config.stateDir, config.botOpenId ?? config.botName ?? 'default')
-    this.seen = new SeenStore(join(config.stateDir, 'seen.jsonl'), { logger: ctx.logger })
+    const botId = config.botId ?? config.botOpenId ?? config.botName ?? 'default'
+    this.registry = new BotBindings(services.registry ?? new BindingRegistry(config.stateDir, botId), botId)
+    this.seen = services.seen ?? new SeenStore(join(config.stateDir, 'seen.jsonl'), { logger: ctx.logger })
     this.metrics = new Metrics()
     this.cli = new LarkCli(ctx, {
       name: config.larkCli,
@@ -174,7 +181,7 @@ export class FeishuBot {
     this.lastEventAt = 0
     this.sessionLookup = new Map()
     this.digestCache = new Map()
-    this.chats = new ChatDirectory(config.stateDir)
+    this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
 
   async start(): Promise<void> {
@@ -589,7 +596,7 @@ export class FeishuBot {
   }
 
   /** Session-facing binding list with resolved group names. */
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
     return this.registry.entries().flatMap(([key, record]) => {
@@ -635,7 +642,7 @@ export class FeishuBot {
     if (this.approvals.has(chatId)) this.settleApproval(chatId, 'cancelled')
     for (const [, record] of records) {
       const sessionId = record.sessionId
-      await this.registry.unbind(record.chatId, record.threadId ?? '', Date.now(), record.botId)
+      await this.registry.unbind(record.chatId, record.threadId ?? '')
       if (sessionId === undefined) continue
       const pending = this.pending.get(sessionId)
       if (pending?.chatId === chatId) {
@@ -1197,6 +1204,148 @@ export class FeishuBot {
   }
 }
 
+/** Aggregate facade over one or more per-bot bridge instances. */
+export class BotHost {
+  readonly ctx: HostContext
+  readonly config: Config
+  readonly bots: FeishuBot[]
+
+  constructor(ctx: HostContext, config: Config, bots: FeishuBot[]) {
+    this.ctx = ctx
+    this.config = config
+    this.bots = bots
+  }
+
+  get primary(): FeishuBot {
+    const bot = this.bots[0]
+    if (bot === undefined) throw new Error('no bot configured')
+    return bot
+  }
+
+  private pick(botId?: string): FeishuBot {
+    if (botId === undefined || botId === '') return this.primary
+    const found = this.bots.find(bot => bot.config.botId === botId || bot.config.botName === botId || bot.config.botOpenId === botId)
+    if (found === undefined) throw new Error(`unknown bot: ${botId}`)
+    return found
+  }
+
+  async start(): Promise<void> {
+    await Promise.all(this.bots.map(bot => bot.start()))
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all(this.bots.map(bot => bot.dispose()))
+  }
+
+  status(): Record<string, unknown> {
+    const primary = this.primary.status()
+    return {
+      ...primary,
+      ready: this.bots.every(bot => bot.status().ready === true),
+      consumer: this.bots.every(bot => bot.status().consumer === true),
+      stopping: this.bots.some(bot => bot.status().stopping === true),
+      bindings: this.bots.reduce((sum, bot) => sum + bot.registry.entries().length, 0),
+      bots: this.bots.map(bot => {
+        const status = bot.status()
+        return { id: bot.config.botId, name: bot.config.botName, ready: status.ready, consumer: status.consumer }
+      }),
+    }
+  }
+
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+    const summaries = await Promise.all(this.bots.map(bot => bot.bindingSummaries(force)))
+    return summaries.flat()
+  }
+
+  async bindingStatus(force = false): Promise<Record<string, unknown>> {
+    return { ...this.status(), bindings: await this.bindingSummaries(force) }
+  }
+
+  async availableChats(force = false): Promise<Array<{ chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>> {
+    const merged = new Map<string, { chatId: string; name: string; botMember: boolean; allowed: boolean; bound: boolean }>()
+    for (const chat of (await Promise.all(this.bots.map(bot => bot.availableChats(force)))).flat()) {
+      const previous = merged.get(chat.chatId)
+      if (previous === undefined) merged.set(chat.chatId, { ...chat })
+      else {
+        previous.botMember = previous.botMember || chat.botMember
+        previous.allowed = previous.allowed || chat.allowed
+        previous.bound = previous.bound || chat.bound
+        if (previous.name === '') previous.name = chat.name
+      }
+    }
+    return [...merged.values()]
+  }
+
+  async groupDetail(chatId: string): Promise<{
+    chatId: string
+    chatName?: string
+    botMember: boolean
+    sessions: Array<{ sessionId: string; at: number; source: string; current: boolean }>
+  }> {
+    const merged = new Map<string, { sessionId: string; at: number; source: string; current: boolean }>()
+    let chatName = ''
+    let botMember = false
+    for (const bot of this.bots) {
+      try {
+        const detail = await bot.groupDetail(chatId)
+        if (chatName === '' && detail.chatName !== undefined) chatName = detail.chatName
+        botMember = botMember || detail.botMember
+        for (const session of detail.sessions) {
+          const previous = merged.get(session.sessionId)
+          if (previous === undefined || session.at > previous.at) merged.set(session.sessionId, session)
+          else if (session.current) previous.current = true
+        }
+      } catch {
+        // A bot that is not in the chat cannot resolve its name; keep the others.
+      }
+    }
+    return {
+      chatId,
+      ...(chatName === '' ? {} : { chatName }),
+      botMember,
+      sessions: [...merged.values()].sort((left, right) => right.at - left.at),
+    }
+  }
+
+  async bindToSession(chatId: string, sessionId: string, botId?: string): Promise<void> {
+    await this.pick(botId).bindToSession(chatId, sessionId)
+  }
+
+  async unbindChat(chatId: string, botId?: string): Promise<boolean> {
+    if (botId !== undefined && botId !== '') return this.pick(botId).unbindChat(chatId)
+    const results = await Promise.all(this.bots.map(bot => bot.unbindChat(chatId)))
+    return results.some(Boolean)
+  }
+
+  async bindChat(chatId: string, sessionId: string, botId?: string): Promise<void> {
+    await this.pick(botId).bindChat(chatId, sessionId)
+  }
+
+  async assertBindableChat(chatId: string, botId?: string): Promise<void> {
+    await this.pick(botId).assertBindableChat(chatId)
+  }
+
+  async allowChat(chatId: string): Promise<boolean> {
+    return this.primary.allowChat(chatId)
+  }
+
+  isBotSession(sessionId: string): boolean {
+    return this.bots.some(bot => bot.isBotSession(sessionId))
+  }
+
+  seedHandoffSession(sessionId: string, title: string, botId?: string): void {
+    this.pick(botId).seedHandoffSession(sessionId, title)
+  }
+
+  applyPermissionPreset(sessionId: string, botId?: string): void {
+    this.pick(botId).applyPermissionPreset(sessionId)
+  }
+
+  chatName(chatId: string, botId?: string): Promise<string | undefined> {
+    return this.pick(botId).chatName(chatId)
+  }
+}
+
 /** Services required by the bridge. */
 export const inject = ['subprocess', 'sessionController', 'sessionProjections', 'tools', 'sessions', 'permissionPresets', 'webServer']
 
@@ -1208,23 +1357,37 @@ export const inject = ['subprocess', 'sessionController', 'sessionProjections', 
 export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   await ctx.sessionProjections.register(taskProjection)
   await ctx.sessionProjections.register(artifactsProjection)
-  const bot = new FeishuBot(ctx, normalizeConfig(config))
-  ctx.effect(() => () => bot.dispose(), 'feishu-bot: lifecycle')
-  registerBindTool(ctx, bot)
+  const base = normalizeConfig(config)
+  const sharedRegistry = new BindingRegistry(base.stateDir, base.bots[0]?.id ?? base.botId)
+  const sharedSeen = new SeenStore(join(base.stateDir, 'seen.jsonl'), { logger: ctx.logger })
+  const sharedChats = new ChatDirectory(base.stateDir)
+  const bots = base.bots.map(bot => new FeishuBot(ctx, {
+    ...base,
+    botId: bot.id,
+    botName: bot.name,
+    ...(bot.openId === undefined ? { botOpenId: undefined } : { botOpenId: bot.openId }),
+    ...(bot.profile === undefined ? { larkProfile: undefined } : { larkProfile: bot.profile }),
+    allowChats: bot.allowChats,
+    approveUsers: bot.approveUsers,
+    permissionPreset: bot.permissionPreset,
+  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats }))
+  const host = new BotHost(ctx, base, bots)
+  ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
+  registerBindTool(ctx, host)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: '/feishu-bot/api',
     handler: (req, res) => {
-      void handleFeishuApi(req, res, bot).catch(error => {
+      void handleFeishuApi(req, res, host).catch(error => {
         sendJson(res, 500, { ok: false, error: String(error) })
       })
     },
   }), 'feishu-bot: api route')
-  void bot.start()
+  void host.start()
 }
 
 /** Let the current Session hand a group to itself, or to a fork of itself. */
-function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
+function registerBindTool(ctx: HostContext, bot: BotHost): void {
   ctx.effect(() => ctx.tools.register({
     name: 'feishu_bind_chat',
     description: 'Bind a Feishu group chat to a DSH Session so future @bot messages continue there. Call when the user asks to talk with people in a Feishu group from here. mode=handoff (default) creates a small new Session with the provided summary; new creates an empty Session; current reuses this Session; fork copies the full history (slow when this Session is large).',
@@ -1244,6 +1407,11 @@ function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
         type: 'string',
         required: false,
         description: 'Compact context summary for mode=handoff; a few sentences are enough.',
+      },
+      bot: {
+        type: 'string',
+        required: false,
+        description: 'Bot id/name/open_id when multiple Feishu bots are configured; defaults to the primary bot.',
       },
     },
     output: {
@@ -1268,10 +1436,11 @@ function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
       kind: 'other',
       rawInput: args,
     }),
-    async execute(args: { chat_id?: unknown; mode?: unknown; handoff?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
+    async execute(args: { chat_id?: unknown; mode?: unknown; handoff?: unknown; bot?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
       const chatId = typeof args.chat_id === 'string' ? args.chat_id.trim() : ''
       if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) throw new Error('chat_id must be a Feishu group id (oc_...)')
-      await bot.assertBindableChat(chatId)
+      const botId = typeof args.bot === 'string' ? args.bot.trim() : ''
+      await bot.assertBindableChat(chatId, botId)
       const current = exec.agent?.session?.id
       if (typeof current !== 'string') throw new Error('feishu_bind_chat requires an owning Session')
       if (bot.isBotSession(current)) throw new Error('this Session is already a Feishu bot Session')
@@ -1279,12 +1448,12 @@ function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
       const handoff = typeof args.handoff === 'string' ? args.handoff.trim() : ''
       await bot.allowChat(chatId)
       let sessionId = current
-      const groupTitle = await bot.chatName(chatId)
+      const groupTitle = await bot.chatName(chatId, botId)
       const title = groupTitle === undefined || groupTitle === '' ? `飞书·${chatId.slice(-8)}` : `飞书·${groupTitle}`
       if (mode === 'fork') {
         const forked = await bot.ctx.sessionController.fork({ sessionId: current })
         sessionId = forked.sessionId
-        bot.applyPermissionPreset(sessionId)
+        bot.applyPermissionPreset(sessionId, botId)
         await bot.ctx.sessionController.rename({ sessionId, title }).catch(() => {})
       } else if (mode === 'new' || mode === 'handoff') {
         const created = await bot.ctx.sessionController.create(
@@ -1293,7 +1462,7 @@ function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
             : { workspaceId: bot.config.workspaceId },
         )
         sessionId = created.sessionId
-        bot.applyPermissionPreset(sessionId)
+        bot.applyPermissionPreset(sessionId, botId)
         await bot.ctx.sessionController.rename({ sessionId, title }).catch(() => {})
         if (mode === 'handoff' && handoff !== '') {
           const resolved = await bot.ctx.sessionController.resolveAgent(sessionId)
@@ -1305,8 +1474,8 @@ function registerBindTool(ctx: HostContext, bot: FeishuBot): void {
           })
         }
       }
-      await bot.bindChat(chatId, sessionId)
-      if (mode === 'handoff') bot.seedHandoffSession(sessionId, title)
+      await bot.bindChat(chatId, sessionId, botId)
+      if (mode === 'handoff') bot.seedHandoffSession(sessionId, title, botId)
       return { chatId, sessionId, mode }
     },
   }), 'feishu-bot: bind tool')
@@ -1339,7 +1508,7 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Web UI bridge for listing groups and binding the current Session. */
-async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: FeishuBot): Promise<void> {
+async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: BotHost): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const method = req.method ?? 'GET'
   const refresh = url.searchParams.get('refresh') === '1'
@@ -1374,12 +1543,13 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: F
   const action = typeof body.action === 'string' ? body.action : ''
   const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : ''
   const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+  const botId = typeof body.botId === 'string' ? body.botId.trim() : ''
   if (action === 'bind') {
     if (chatId === '' || sessionId === '') {
       sendJson(res, 400, { ok: false, error: 'chatId and sessionId are required' })
       return
     }
-    await bot.bindToSession(chatId, sessionId)
+    await bot.bindToSession(chatId, sessionId, botId)
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
     return
   }
@@ -1388,7 +1558,7 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: F
       sendJson(res, 400, { ok: false, error: 'chatId is required' })
       return
     }
-    await bot.unbindChat(chatId)
+    await bot.unbindChat(chatId, botId)
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
     return
   }
