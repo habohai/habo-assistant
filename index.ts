@@ -80,6 +80,7 @@ export interface BotServices {
   chats?: ChatDirectory
   botNames?: ReadonlyMap<string, string>
   isPrimary?: boolean
+  onStatusChange?: () => void
 }
 
 interface PendingTurn {
@@ -148,6 +149,7 @@ export class FeishuBot {
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
   private readonly isPrimary: boolean
+  private readonly onStatusChange?: () => void
   /** Runtime chat admission; profile allowChats stays in config. */
   private readonly chats: ChatDirectory
 
@@ -197,6 +199,7 @@ export class FeishuBot {
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
     this.isPrimary = services.isPrimary ?? true
+    this.onStatusChange = services.onStatusChange
     this.chats = services.chats ?? new ChatDirectory(config.stateDir)
   }
 
@@ -287,6 +290,7 @@ export class FeishuBot {
     }
     this.consumer = handle
     this.ready = false
+    this.onStatusChange?.()
     this.armReadyWatchdog(handle)
     createInterface({ input: handle.stdout }).on('line', line => {
       this.onEventLine(line)
@@ -294,6 +298,7 @@ export class FeishuBot {
     createInterface({ input: handle.stderr }).on('line', line => {
       if (line.includes(READY_MARKER)) {
         this.ready = true
+        this.onStatusChange?.()
         this.restartDelay = 1000
         if (this.readyTimer !== undefined) clearTimeout(this.readyTimer)
         this.readyTimer = undefined
@@ -330,6 +335,7 @@ export class FeishuBot {
 
   onConsumerGone(): void {
     this.ready = false
+    this.onStatusChange?.()
     this.consumer = undefined
     if (this.readyTimer !== undefined) clearTimeout(this.readyTimer)
     this.readyTimer = undefined
@@ -1764,6 +1770,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   const sharedSeen = new SeenStore(join(base.stateDir, 'seen.jsonl'), { logger: ctx.logger })
   const sharedChats = new ChatDirectory(base.stateDir)
   const botNames = new Map(base.bots.map(bot => [bot.id, bot.name]))
+  let notifyStatus: (() => void) | undefined
   const bots = base.bots.map((bot, index) => new FeishuBot(ctx, {
     ...base,
     botId: bot.id,
@@ -1773,8 +1780,9 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     allowChats: bot.allowChats,
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
-  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0 }))
+  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0, onStatusChange: () => notifyStatus?.() }))
   const host = new BotHost(ctx, base, bots)
+  notifyStatus = () => host.notifyBindings()
   sharedRegistry.onChange = () => host.notifyBindings()
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
