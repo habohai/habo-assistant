@@ -157,12 +157,12 @@ function formatDuration(startedAt: number, now: number): string {
 
 function formatClockSeconds(time: number): string {
   if (!Number.isFinite(time) || time <= 0) return '--:--:--'
-  return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, hourCycle: 'h23' })
 }
 
 function formatClock(time: number): string {
   if (!Number.isFinite(time) || time <= 0) return ''
-  return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' })
 }
 
 /** Create the tab body with the host navigation and refresh hooks captured. */

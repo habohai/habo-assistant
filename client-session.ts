@@ -1314,7 +1314,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         : isPrivate
           ? (group.chatName === undefined || group.chatName === '' ? t('feishu.privateTitle') : t('feishu.privateWith', { name: group.chatName }))
           : groupDisplayName(group.chatName, group.chatId)
-      const timeOf = (at: number): string => at > 0 ? new Date(at).toLocaleString() : t('feishu.unknownTime')
+      const timeOf = (at: number): string => at > 0
+        ? new Date(at).toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' })
+        : t('feishu.unknownTime')
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
           className: 'sa-dialog',
