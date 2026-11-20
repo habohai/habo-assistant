@@ -38,6 +38,8 @@ export interface Config {
   ackReaction: string
   timeoutMs: number
   maxReplyChars: number
+  /** Prompt-level style constraints for every Feishu reply. */
+  replyGuidelines: string
   maxConcurrent: number
   maxQueue: number
   cliTimeoutMs: number
@@ -57,6 +59,7 @@ export interface Config {
 export const DEFAULTS = {
   timeoutMs: 10 * 60 * 1000,
   maxReplyChars: 3500,
+  replyGuidelines: '使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题。',
   maxConcurrent: 4,
   maxQueue: 20,
   cliTimeoutMs: 15_000,
@@ -109,6 +112,7 @@ export function normalizeConfig(raw: unknown): Config {
     ackReaction: normalizeAckReaction(string('ackReaction', 'OnIt')),
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
+    replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines),
     maxConcurrent: integer('maxConcurrent', DEFAULTS.maxConcurrent, 1, 32),
     maxQueue: integer('maxQueue', DEFAULTS.maxQueue, 1, 500),
     cliTimeoutMs: integer('cliTimeoutMs', DEFAULTS.cliTimeoutMs, 1_000, 120_000),

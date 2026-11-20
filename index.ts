@@ -1168,7 +1168,7 @@ export class FeishuBot {
       pending.timer.unref?.()
       this.pending.set(sessionId, pending)
       const peers = this.registry.peersForChat(event.chatId)
-      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peers.length}`}`
+      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peers.length}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}`
       const header = groupName === undefined || groupName === ''
         ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
         : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
