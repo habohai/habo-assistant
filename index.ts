@@ -873,10 +873,11 @@ export class FeishuBot {
     await this.allowChat(chatId)
   }
 
-  /** Remove every binding for one chat and suppress automatic re-discovery. */
-  async unbindChat(chatId: string): Promise<boolean> {
+  /** Remove one conversation (or every thread of a chat) and suppress re-discovery. */
+  async unbindChat(chatId: string, threadId?: string): Promise<boolean> {
+    const exact = threadId === undefined ? undefined : (threadId === '' ? chatId : `${chatId}::${threadId}`)
     const records = this.registry.entries()
-      .filter(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+      .filter(([key]) => exact === undefined ? key === chatId || key.startsWith(`${chatId}::`) : key === exact)
     if (records.length === 0) return false
     if (this.approvals.has(chatId)) this.settleApproval(chatId, 'cancelled')
     for (const [, record] of records) {
@@ -1721,8 +1722,8 @@ export class BotHost {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
 
-  async unbindChat(chatId: string, botId?: string): Promise<boolean> {
-    return this.pick(botId).unbindChat(chatId)
+  async unbindChat(chatId: string, botId?: string, threadId?: string): Promise<boolean> {
+    return this.pick(botId).unbindChat(chatId, threadId)
   }
 
   async bindChat(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
@@ -2039,13 +2040,13 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : ''
   const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
   const botId = typeof body.botId === 'string' ? body.botId.trim() : ''
-  const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : ''
+  const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : undefined
   if (action === 'bind') {
     if (chatId === '' || sessionId === '') {
       sendJson(res, 400, { ok: false, error: 'chatId and sessionId are required' })
       return
     }
-    await bot.bindToSession(chatId, sessionId, botId, threadId)
+    await bot.bindToSession(chatId, sessionId, botId, threadId ?? '')
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
     return
   }
@@ -2054,7 +2055,7 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
       sendJson(res, 400, { ok: false, error: 'chatId is required' })
       return
     }
-    await bot.unbindChat(chatId, botId)
+    await bot.unbindChat(chatId, botId, threadId)
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
     return
   }
