@@ -184,9 +184,10 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
     const useSessions = props.useSessions as <T>(selector: (state: SessionsState) => T) => T
     const state = useSessions(snapshot => snapshot)
     React.useEffect(() => {
-      const tick = (): void => { void refresh().catch(() => {}) }
-      tick()
-      const timer = setInterval(tick, 5000)
+      // Don't refresh on mount: reopening this page after a session click used
+      // to reorder the sidebar session list and flash every time. The 5s poll
+      // keeps task projections fresh without an immediate remount refresh.
+      const timer = setInterval(() => { void refresh().catch(() => {}) }, 5000)
       return () => clearInterval(timer)
     }, [])
 
