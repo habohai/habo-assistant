@@ -1127,6 +1127,20 @@ export class FeishuBot {
       && (resolution.kind === 'explicit' || resolution.kind === 'auto')) {
       void this.refreshPrivateTitle(known, event.chatId)
     }
+    if (event.chatType === 'group') {
+      const candidate = this.registry.candidateFor(event.chatId)
+      const recent = candidate?.sessionId !== undefined && candidate.at > 0
+        && Date.now() - candidate.at <= this.config.outboundReplyTtlMs
+      const activeSession = resolution.kind === 'explicit' || resolution.kind === 'auto' ? known : undefined
+      if (recent && candidate.sessionId !== undefined && candidate.sessionId !== activeSession) {
+        // A group member is replying shortly after this session sent there;
+        // the sender session takes over, replacing an older group binding.
+        await this.setBinding(key, candidate.sessionId, 'auto')
+        await this.recordChatAffinity(event.chatId, candidate.sessionId, Date.now())
+        this.trackSession(candidate.sessionId, event.chatId)
+        return candidate.sessionId
+      }
+    }
     if (known !== undefined && resolution.kind === 'explicit') {
       // Explicit/manual binding is authoritative: never discover, digest, or create.
       if (workspace !== undefined && !workspace.sessionIds.includes(known)) {

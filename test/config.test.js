@@ -16,6 +16,7 @@ test('normalizeConfig keeps documented defaults', () => {
   assert.equal(config.p2pSessionTtlMs, 30 * 24 * 60 * 60 * 1000)
   assert.match(config.replyGuidelines, /使用中文/)
   assert.equal(config.chatListTtlMs, 5 * 60 * 1000)
+  assert.equal(config.outboundReplyTtlMs, 30 * 60 * 1000)
   assert.equal(normalizeConfig({ chatListTtlMs: 60_000 }).chatListTtlMs, 60_000)
   assert.equal(normalizeConfig({ replyGuidelines: '' }).replyGuidelines, '')
   assert.equal(normalizeConfig({ p2pSessionTtlMs: 7 * 24 * 60 * 60 * 1000 }).p2pSessionTtlMs, 7 * 24 * 60 * 60 * 1000)

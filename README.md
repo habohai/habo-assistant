@@ -59,6 +59,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 
 群名/私聊 peer 名和 bot 列表都来自缓存或 p2p 消息解析，不在源码里写死任何 open_id/chat_id。
 
+群回复在 `outboundReplyTtlMs`（默认 30 分钟）内优先回到刚发消息的 session。
+
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。
 
 回复默认要求中文、简洁、有条理；可用 `replyGuidelines` 覆盖，设为空字符串可关闭。

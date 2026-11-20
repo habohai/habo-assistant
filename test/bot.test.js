@@ -397,3 +397,24 @@ test('an expired p2p binding starts a fresh Session', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a recent outbound group affinity wins over discovery', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    await bot.registry.bind('oc_1', '', 'ses_old', 'manual', Date.now())
+    await bot.registry.recordCandidate('oc_1', 'ses_sender', Date.now())
+    bot.ctx.sessionController.list = async () => ({
+      items: [{ id: 'ses_other', updatedAt: Date.now(), projectionValues: { feishuBotTask: { bot: true, chatId: 'oc_1', updatedAt: Date.now() } } }],
+    })
+    const event = {
+      chatId: 'oc_1', chatType: 'group', messageId: 'om_reply', threadKey: '',
+      senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: 'reply',
+    }
+    const sessionId = await bot.ensureSession('oc_1', event, 'reply')
+    assert.equal(sessionId, 'ses_sender')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_sender')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
