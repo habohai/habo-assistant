@@ -1043,13 +1043,13 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             ? h('div', { className: 'sa-feishu-empty' }, t('feishu.missing'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.missingHint')))
             : boundGroups.size === 0
               ? h('div', { className: 'sa-feishu-empty' }, t('feishu.empty'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.emptyHint')))
-              : h('div', null, [...boundGroups.entries()].map(([chatId, bindings]) => {
+              : h('div', null, [...boundGroups.entries()].map(([rowKey, bindings]) => {
                 const binding = bindings[0]
                 const isPrivate = binding.chatType === 'p2p'
                 const names = [...new Set(bindings.flatMap(item => (item.botIds ?? (item.botId === undefined ? [] : [item.botId])).map(id => botNameOf(id))))].filter(name => name !== '').join(' / ')
                 return h('div', {
                 className: 'sa-feishu-row',
-                key: chatId,
+                key: rowKey,
                 role: 'button',
                 tabIndex: 0,
                 title: `${groupDisplayName(binding.chatName, binding.chatId)}${binding.threadId === undefined || binding.threadId === '' ? '' : ` · ${t('feishu.topicLabel')}`}`,
@@ -1077,7 +1077,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   'aria-label': t('feishu.unbind'),
                   onClick: (event: { stopPropagation(): void }) => {
                     event.stopPropagation()
-                    onUnbind(chatId)
+                    onUnbind(binding.chatId)
                   },
                 }, t('feishu.unbind')),
                 h('span', { className: 'sa-feishu-chevron', 'aria-hidden': true }, '›'),
