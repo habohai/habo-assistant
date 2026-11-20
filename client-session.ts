@@ -219,6 +219,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'lark.other': '飞书资源',
       'feishu.title': '飞书群',
       'feishu.bot': '机器人',
+      'feishu.boundBots': '已绑定的机器人',
       'feishu.bind': '绑定飞书群',
       'feishu.refresh': '刷新',
       'feishu.empty': '还没有绑定飞书群',
@@ -297,6 +298,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'lark.other': 'Feishu resource',
       'feishu.title': 'Feishu groups',
       'feishu.bot': 'Bot',
+      'feishu.boundBots': 'Bound bots',
       'feishu.bind': 'Bind Feishu group',
       'feishu.refresh': 'Refresh',
       'feishu.empty': 'No Feishu group bound yet',
@@ -377,6 +379,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-feishu-title { flex: none; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 18px; }
 .sa-feishu-total { flex: none; color: var(--dsw-alias-label-quaternary); font-size: 11px; line-height: 16px; }
 .sa-feishu-bot { padding: 0 8px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+.sa-feishu-bots { padding: 0 8px 4px; }
+.sa-feishu-bots-label { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+.sa-feishu-bot-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.sa-feishu-bot-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
+.sa-feishu-bot-item::before { content: '·'; margin-right: 5px; color: var(--dsw-alias-label-quaternary); }
 .sa-feishu-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
 .sa-feishu-bind { display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font: inherit; font-size: 11px; white-space: nowrap; }
 @media (hover: hover) { .sa-feishu-bind:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); } }
@@ -967,7 +974,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const bound = (status?.bindings ?? []).filter(binding => binding.sessionId === sessionId)
       const botById = new Map((status?.bots ?? []).map(bot => [bot.id, bot.name]))
       const boundBotIds = [...new Set(bound.map(binding => binding.botId).filter((id): id is string => id !== undefined))]
-      const botLabel = boundBotIds.map(id => botById.get(id) ?? id).join(' / ')
+      const boundBotNames = boundBotIds.map(id => botById.get(id) ?? id)
       const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
       const boundGroups = new Map<string, FeishuBinding[]>()
       for (const binding of bound) {
@@ -995,7 +1002,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             }, h(RefreshGlyph)),
           ),
         ),
-        botLabel === '' ? null : h('div', { className: 'sa-feishu-bot', title: botLabel }, `${t('feishu.bot')} · ${botLabel}`),
+        boundBotNames.length === 0 ? null : h('div', { className: 'sa-feishu-bots' },
+          h('div', { className: 'sa-feishu-bots-label' }, t('feishu.boundBots')),
+          h('ul', { className: 'sa-feishu-bot-list' }, boundBotNames.map(name => h('li', { className: 'sa-feishu-bot-item', key: name }, name))),
+        ),
         loading
           ? h('div', { className: 'sa-feishu-note' }, t('feishu.loading'))
           : error !== ''
