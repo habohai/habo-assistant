@@ -218,6 +218,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'lark.board': '飞书画板',
       'lark.other': '飞书资源',
       'feishu.title': '飞书群',
+      'feishu.privateTitle': '飞书私聊',
+      'feishu.sessionTitle': '飞书会话',
+      'feishu.privateCount': '{count} 个私聊',
+      'feishu.sessionCount': '{count} 个会话',
+      'feishu.privateWith': '与 {name} 的私聊',
       'feishu.bot': '机器人',
       'feishu.boundBots': '已绑定的机器人',
       'feishu.bind': '绑定飞书群',
@@ -297,6 +302,11 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'lark.board': 'Feishu board',
       'lark.other': 'Feishu resource',
       'feishu.title': 'Feishu groups',
+      'feishu.privateTitle': 'Feishu DMs',
+      'feishu.sessionTitle': 'Feishu chats',
+      'feishu.privateCount': '{count} DMs',
+      'feishu.sessionCount': '{count} chats',
+      'feishu.privateWith': 'DM with {name}',
       'feishu.bot': 'Bot',
       'feishu.boundBots': 'Bound bots',
       'feishu.bind': 'Bind Feishu group',
@@ -982,10 +992,20 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         list.push(binding)
         boundGroups.set(binding.chatId, list)
       }
+      const privateGroups = [...boundGroups.values()].filter(bindings => bindings[0]?.chatType === 'p2p').length
+      const groupGroups = boundGroups.size - privateGroups
+      const sectionTitle = groupGroups > 0 && privateGroups > 0
+        ? t('feishu.sessionTitle')
+        : groupGroups === 0 && privateGroups > 0 ? t('feishu.privateTitle') : t('feishu.title')
+      const countLabel = groupGroups > 0 && privateGroups > 0
+        ? t('feishu.sessionCount', { count: String(boundGroups.size) })
+        : privateGroups > 0 && groupGroups === 0
+          ? t('feishu.privateCount', { count: String(boundGroups.size) })
+          : t('feishu.chatCount', { count: String(boundGroups.size) })
       return h('section', { className: 'sa-feishu' },
         h('div', { className: 'sa-feishu-head' },
-          h('span', { className: 'sa-feishu-title' }, t('feishu.title')),
-          boundGroups.size === 0 ? null : h('span', { className: 'sa-feishu-total' }, t('feishu.chatCount', { count: String(boundGroups.size) })),
+          h('span', { className: 'sa-feishu-title' }, sectionTitle),
+          boundGroups.size === 0 ? null : h('span', { className: 'sa-feishu-total' }, countLabel),
           h('span', { className: 'sa-feishu-actions' },
             h('button', {
               type: 'button',
@@ -1014,6 +1034,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               ? h('div', { className: 'sa-feishu-empty' }, t('feishu.empty'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.emptyHint')))
               : h('div', null, [...boundGroups.entries()].map(([chatId, bindings]) => {
                 const binding = bindings[0]
+                const isPrivate = binding.chatType === 'p2p'
                 const names = bindings.map(item => botNameOf(item.botId)).filter(name => name !== '').join(' / ')
                 return h('div', {
                 className: 'sa-feishu-row',
@@ -1030,10 +1051,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
               },
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
-                  h('span', { className: 'sa-feishu-name' }, groupDisplayName(binding.chatName, binding.chatId)),
+                  h('span', { className: 'sa-feishu-name' }, isPrivate ? t('feishu.privateWith', { name: names === '' ? t('feishu.bot') : names }) : groupDisplayName(binding.chatName, binding.chatId)),
                   h('span', { className: 'sa-feishu-meta' }, names === '' ? t('feishu.boundBots') : names),
                 ),
-                binding.botMember === false
+                !isPrivate && binding.botMember === false
                   ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true', title: t('feishu.botMissingHint') }, t('feishu.botMissing'))
                   : null,
                 h('button', {

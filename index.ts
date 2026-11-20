@@ -376,6 +376,11 @@ export class FeishuBot {
       this.ctx.logger.debug(`feishu-bot: ignore chat=${event.chatId} type=${event.messageType}`)
       return
     }
+    if (event.chatType === 'p2p') {
+      void this.chats.allow(event.chatId, Date.now(), 'p2p').catch(error => {
+        this.ctx.logger.warn(`feishu-bot: cannot remember p2p chat ${event.chatId}: ${String(error)}`)
+      })
+    }
     if (text === '') {
       this.metrics.inc('emptyQuestion')
       this.fireReply(event, '请描述你的问题。')
@@ -597,7 +602,7 @@ export class FeishuBot {
   }
 
   /** Session-facing binding list with resolved group names. */
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
     return this.registry.entries().flatMap(([key, record]) => {
@@ -607,6 +612,7 @@ export class FeishuBot {
       const p2p = info === undefined && this.chats.kind(chatId) === 'p2p'
       return [{
         chatId,
+        chatType: this.chats.kind(chatId) === 'p2p' || p2p ? 'p2p' : 'group',
         botId: record.botId,
         sessionId: record.sessionId,
         source: record.source,
@@ -1270,7 +1276,7 @@ export class BotHost {
     }
   }
 
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
     const summaries = await Promise.all(this.bots.map(bot => bot.bindingSummaries(force)))
     return summaries.flat()
   }

@@ -17,6 +17,7 @@ export interface ApiEnvelope<T> {
 
 export interface FeishuBinding {
   chatId: string
+  chatType?: 'group' | 'p2p'
   botId?: string
   sessionId: string
   chatName?: string
