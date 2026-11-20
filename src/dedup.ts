@@ -29,6 +29,7 @@ export class SeenStore {
   /** message id -> accepted-at, oldest first. */
   readonly map: Map<string, number>
   private writes: Promise<void>
+  private appended: number
 
   /** @param file JSONL path. */
   constructor(file: string, { ttlMs = DEFAULT_TTL_MS, max = DEFAULT_MAX, logger }: SeenOptions = {}) {
@@ -38,6 +39,7 @@ export class SeenStore {
     this.logger = logger
     this.map = new Map()
     this.writes = Promise.resolve()
+    this.appended = 0
   }
 
   get size(): number {
@@ -103,12 +105,23 @@ export class SeenStore {
       this.map.delete(oldest)
     }
     this.append(id, now)
+    this.appended += 1
+    if (this.appended >= this.max) {
+      this.appended = 0
+      this.writes = this.writes
+        .then(() => this.rewrite())
+        .catch(error => this.warn(`cannot compact ${this.file}: ${String(error)}`))
+    }
     return true
   }
 
   /** Rewrite the journal atomically from memory. */
   async flush(): Promise<void> {
     await this.writes
+    await this.rewrite()
+  }
+
+  private async rewrite(): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true })
     const body = [...this.map].map(([id, at]) => JSON.stringify({ id, at })).join('\n')
     const temp = `${this.file}.${process.pid}.${Date.now()}.tmp`
