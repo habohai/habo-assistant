@@ -441,6 +441,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-input:focus { border-color: var(--dsw-alias-state-business-primary); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-state-business-primary); }
 .sa-bot-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .sa-bot-picker .sa-input { flex: 1; }
+.sa-topic-inline { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 2px 8px 8px 37px; padding: 6px 8px; border-radius: 7px; background: var(--dsw-alias-bg-layer-3); }
+.sa-topic-inline-label { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.sa-topic-inline .sa-input { flex: 1 1 150px; height: 26px; }
+.sa-topic-inline-note { flex: 1 1 100%; color: var(--dsw-alias-label-quaternary); font-size: 10px; line-height: 14px; }
 .sa-bindings-dialog { max-width: 520px; }
 .sa-binding-list { display: flex; flex-direction: column; gap: 2px; }
 .sa-binding-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 8px; border-radius: var(--dsw-radius-md); }
@@ -1183,6 +1187,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         const memberBots = chat?.bots?.filter(bot => bot.member) ?? []
         if (memberBots.length > 0 && !memberBots.some(bot => bot.id === botId)) onBotChange(memberBots[0].id)
       }
+      const topicLabel = (topic: FeishuTopic, index: number): string => {
+        const time = topic.updatedAt > 0
+          ? new Date(topic.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' })
+          : ''
+        const title = topic.title.trim()
+        const base = title === '' || title === '话题' ? `${t('feishu.topicLabel')} ${index + 1}` : title
+        return time === '' ? base : `${base} · ${time}`
+      }
       const submit = (): void => {
         if (target !== '' && !busy) onBind(target, selectedChat === undefined ? '' : botId, manual.trim() === '' ? threadId : '')
       }
@@ -1237,6 +1249,24 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                         ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true' }, t('feishu.botMissing'))
                         : chat.bound ? h('span', { className: 'sa-chat-badge' }, t('feishu.bound')) : null,
                     ),
+                    selected === chat.chatId
+                      ? h('div', { className: 'sa-topic-inline' },
+                        h('span', { className: 'sa-topic-inline-label' }, t('feishu.topicLabel')),
+                        h('select', {
+                          className: 'sa-input',
+                          value: threadId,
+                          onChange: (event: { target: { value: string } }) => { setThreadId(event.target.value) },
+                        },
+                          h('option', { value: '' }, t('feishu.topicMain')),
+                          topics.map((topic, index) => h('option', { key: topic.threadId, value: topic.threadId }, topicLabel(topic, index))),
+                        ),
+                        topicsLoading
+                          ? h('span', { className: 'sa-topic-inline-note' }, t('feishu.topicLoading'))
+                          : topics.length === 0
+                            ? h('span', { className: 'sa-topic-inline-note' }, t('feishu.topicEmpty'))
+                            : null,
+                      )
+                      : null,
                   ))),
             selectedChat === undefined || availableBots.length === 0
               ? null
@@ -1248,24 +1278,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
                 }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
               ),
-            selectedChat === undefined
-              ? null
-              : h('label', { className: 'sa-bot-picker' },
-                h('span', null, t('feishu.topicLabel')),
-                h('select', {
-                  className: 'sa-input',
-                  value: threadId,
-                  onChange: (event: { target: { value: string } }) => { setThreadId(event.target.value) },
-                },
-                  h('option', { value: '' }, t('feishu.topicMain')),
-                  topics.map(topic => h('option', { key: topic.threadId, value: topic.threadId }, topic.title)),
-                ),
-              ),
-            topicsLoading
-              ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicLoading'))
-              : selectedChat !== undefined && topics.length === 0
-                ? h('div', { className: 'sa-dialog-empty' }, t('feishu.topicEmpty'))
-                : null,
             h('button', {
               type: 'button',
               className: 'sa-manual-toggle',
