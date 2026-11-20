@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Habo-Assistant",
+    "description": "Feishu group bot, session bindings, task board, and session artifacts: route @bot messages into a DSH session with explicit bind/unbind and recent-session reuse, then inspect tasks and artifacts in the right Sidebar."
+  }
+}

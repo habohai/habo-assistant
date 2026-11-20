@@ -1,0 +1,55 @@
+# 飞书群机器人挂载层。
+# 安装后先在这里填 cwd 与 allowChats，否则插件只打一条警告、不会启动长连接。
+- insert:
+    - id: habo-assistant
+      name: 'habo-assistant'
+      config:
+        # 必填：agent 的工作目录（绝对路径），建议固定到一个 repo。
+        cwd: ''
+        # 必填：允许触发的 chat_id（oc_ 开头）；开发期可用 ['*'] 临时放开。
+        allowChats: []
+        # 可选：机器人自己的 open_id（ou_ 开头）。不填时依赖群 @ 事件订阅过滤。
+        # botOpenId: ''
+        # 可选：专用 agent preset。
+        # agentPreset: ''
+        # 可选：chat（默认，一群一 session）或 thread（chat + thread 各一 session）。
+        # routing: chat
+        # 可选：是否回复到原消息的 thread（默认 true）。
+        # replyInThread: true
+        # 可选：收到即加的表情回执（默认 OnIt）；'' / none / off 关闭。
+        # ackReaction: OnIt
+        # 可选：发占位消息并在答案返回后原地编辑（默认 true）。
+        # 需要 lark-cli >= 1.0.100；旧版本会自动降级为只用表情回执。
+        # progress: true
+        # 可选：全局并发上限（默认 4，1-32）。
+        # maxConcurrent: 4
+        # 可选：单群排队上限，超出直接回「排队较多」（默认 20，1-500）。
+        # maxQueue: 20
+        # 可选：单次处理超时（默认 10 分钟，最小 5s）。
+        # timeoutMs: 600000
+        # 可选：单条回复上限，超出分段（默认 3500 字符，最小 200）。
+        # maxReplyChars: 3500
+        # 可选：单次 lark-cli 调用上限（默认 15s）。
+        # cliTimeoutMs: 15000
+        # 可选：长连接 ready 看门狗（默认 30s）。
+        # readyTimeoutMs: 30000
+        # 可选：指标日志间隔（默认 5 分钟，有变化才打印）。
+        # statsIntervalMs: 300000
+        # 可选：命令审批。all（默认）= 每个命令工具调用都要人工批准；off = 不审批直接执行。
+        # commandApproval: all
+        # 可选：哪些工具算“命令”（默认 bash、pwsh；PTC 执行器可加 run_code）。
+        # approvalTools: [bash, pwsh]
+        # 可选：审批开启时直接禁用的工具（默认 subagent / subagent_fork / workflow，
+        # 它们派生的新会话不在审批白名单里，会绕过审批）。
+        # approvalDenyTools: [subagent, subagent_fork, workflow]
+        # 可选：审批等待上限（默认 120s，超时按“无人批准”处理，命令不执行）。
+        # approvalTimeoutMs: 120000
+        # 可选：危险命令正则（默认见 src/approval.js DEFAULT_DENY_PATTERNS，按段首匹配）。
+        # 命中的命令直接拒绝，不进入审批；要放宽就整体覆盖这个列表。
+        # denyCommands: ['(?:^|[\n;&|]\s*)rm(?:\s|$)']
+        # 可选：允许审批的 open_id 列表（默认空 = 群里任何人都能批）。
+        # approveUsers: []
+        # 可选：绑定表与去重日志目录（默认 ~/.dsh/feishu-bot）。
+        # stateDir: ''
+        # 可选：只打印回复不真正发送，用于联调。
+        # dryRun: false

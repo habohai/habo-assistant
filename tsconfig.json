@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "jsx": "react",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "React.Fragment"
+  },
+  "include": [
+    "index.ts",
+    "client.tsx",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "lib",
+    "node_modules",
+    "test"
+  ]
+}
