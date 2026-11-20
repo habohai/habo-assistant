@@ -1503,6 +1503,8 @@ export class FeishuBot {
 
 /** Aggregate facade over one or more per-bot bridge instances. */
 export class BotHost {
+  private readonly eventClients = new Set<ServerResponse>()
+  private eventTimer: NodeJS.Timeout | undefined
   readonly ctx: HostContext
   readonly config: Config
   readonly bots: FeishuBot[]
@@ -1531,6 +1533,12 @@ export class BotHost {
   }
 
   async dispose(): Promise<void> {
+    if (this.eventTimer !== undefined) clearTimeout(this.eventTimer)
+    this.eventTimer = undefined
+    for (const client of [...this.eventClients]) {
+      try { client.end() } catch { /* already closed */ }
+    }
+    this.eventClients.clear()
     await Promise.all(this.bots.map(bot => bot.dispose()))
   }
 
@@ -1555,6 +1563,45 @@ export class BotHost {
 
   async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean; threadId: string }>> {
     return this.primary.bindingSummaries(force)
+  }
+
+  /** Push one binding-change event to every open SSE client (debounced). */
+  notifyBindings(): void {
+    if (this.eventTimer !== undefined) return
+    this.eventTimer = setTimeout(() => {
+      this.eventTimer = undefined
+      for (const client of [...this.eventClients]) {
+        try {
+          client.write('event: bindings\ndata: {}\n\n')
+        } catch {
+          this.eventClients.delete(client)
+        }
+      }
+    }, 50)
+    this.eventTimer.unref?.()
+  }
+
+  /** SSE channel: the browser refreshes bindings on this event instead of polling. */
+  serveEvents(req: IncomingMessage, res: ServerResponse): void {
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    })
+    res.flushHeaders?.()
+    res.write('retry: 2000\n\n')
+    this.eventClients.add(res)
+    const keepalive = setInterval(() => {
+      try { res.write(': ping\n\n') } catch { /* closed */ }
+    }, 20_000)
+    keepalive.unref?.()
+    const cleanup = (): void => {
+      clearInterval(keepalive)
+      this.eventClients.delete(res)
+    }
+    req.on('close', cleanup)
+    res.on('close', cleanup)
   }
 
   async bindingStatus(force = false): Promise<Record<string, unknown>> {
@@ -1728,6 +1775,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     permissionPreset: bot.permissionPreset,
   }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0 }))
   const host = new BotHost(ctx, base, bots)
+  sharedRegistry.onChange = () => host.notifyBindings()
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
   registerBindingInfoTool(ctx, host)
@@ -1740,6 +1788,11 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
       })
     },
   }), 'feishu-bot: api route')
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'prefix',
+    path: '/feishu-bot/events',
+    handler: (req, res) => { host.serveEvents(req, res) },
+  }), 'feishu-bot: event route')
   void host.start()
 }
 

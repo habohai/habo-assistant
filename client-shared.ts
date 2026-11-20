@@ -8,6 +8,7 @@
 import type * as ReactNS from 'react'
 
 export const FEISHU_API = '/feishu-bot/api'
+export const FEISHU_EVENTS = '/feishu-bot/events'
 
 export interface ApiEnvelope<T> {
   ok: boolean
@@ -101,7 +102,7 @@ export interface FeishuStatusState {
 
 /**
  * One status fetch/reload state machine for both Sidebar pages.
- * `pollMs` keeps a connection view live; session-info uses `refresh=1` on open.
+ * A binding-change SSE event triggers an immediate refresh; no polling.
  */
 export function useFeishuStatus(
   React: typeof ReactNS,
@@ -136,6 +137,13 @@ export function useFeishuStatus(
       if (timer !== undefined) clearInterval(timer)
     }
   }, [React, refresh, pollMs, nonce])
+  React.useEffect(() => {
+    if (typeof EventSource === 'undefined') return undefined
+    const source = new EventSource(FEISHU_EVENTS)
+    const onChange = (): void => setNonce(value => value + 1)
+    source.addEventListener('bindings', onChange)
+    return () => source.close()
+  }, [React])
   return { data, loading, error, reload: () => setNonce(value => value + 1) }
 }
 
@@ -148,7 +156,7 @@ export function useFeishuConnection(React: typeof ReactNS): {
   boundSessions?: Set<string>
   updatedAt?: number
 } {
-  const { data } = useFeishuStatus(React, { pollMs: 3000 })
+  const { data } = useFeishuStatus(React)
   const connection: ConnectionState = data === undefined
     ? 'connecting'
     : data.ready === true && data.consumer === true

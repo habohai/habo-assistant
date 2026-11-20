@@ -62,6 +62,8 @@ export class BindingRegistry {
   private readonly historyByChat: Map<string, BindingRecord[]>
   /** conversation key -> unbind suppression. */
   private readonly suppressed: Set<string>
+  /** Host-side change hook; fired after a durable ownership/grant change. */
+  onChange?: () => void
   private writes: Promise<void>
   private appends: number
   readonly ready: Promise<void>
@@ -338,6 +340,7 @@ export class BindingRegistry {
     }
     this.apply(record)
     await this.append(record)
+    this.onChange?.()
   }
 
   async bind(chatId: string, threadId: string, sessionId: string, source: BindingSource, at = Date.now(), botId = this.defaultBotId): Promise<BindingRecord> {
@@ -347,6 +350,7 @@ export class BindingRegistry {
     }
     this.apply(record)
     await this.append(record)
+    this.onChange?.()
     return record
   }
 
@@ -355,6 +359,7 @@ export class BindingRegistry {
     const record: BindingRecord = { botId, op: 'unbind', key, chatId, ...(threadId === '' ? {} : { threadId }), source: 'auto', at, state: 'unbound' }
     this.apply(record)
     await this.append(record)
+    this.onChange?.()
   }
 
   async recordCandidate(chatId: string, sessionId: string, at = Date.now(), botId = this.defaultBotId): Promise<void> {

@@ -1411,7 +1411,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const { getTriggerProps } = useContextMenu()
       const [closedSections, setClosedSections] = useState<Record<string, boolean>>({})
       const [closedDirs, setClosedDirs] = useState<Record<string, boolean>>({})
-      const feishu = useFeishuStatus(React, { pollMs: 3000 })
+      const feishu = useFeishuStatus(React)
       const [bindOpen, setBindOpen] = useState(false)
       const [chats, setChats] = useState<FeishuChat[]>([])
       const [chatsLoading, setChatsLoading] = useState(false)

@@ -94,3 +94,21 @@ test('compaction preserves active, history, candidates, and suppression', async 
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('binding changes fire the host change hook', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'habo-binding-'))
+  try {
+    const registry = new BindingRegistry(dir, 'bot_a')
+    await registry.ready
+    let changes = 0
+    registry.onChange = () => { changes += 1 }
+    await registry.bind('oc_1', '', 'ses_a', 'manual', 10, 'bot_a')
+    assert.equal(changes, 1)
+    await registry.grant('oc_1', 'bot_b', 20)
+    assert.equal(changes, 2)
+    await registry.unbind('oc_1', '', 30, 'bot_a')
+    assert.equal(changes, 3)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
