@@ -443,6 +443,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-input:focus { border-color: var(--dsw-alias-state-business-primary); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-state-business-primary); }
 .sa-bot-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .sa-bot-picker .sa-input { flex: 1; }
+.sa-search { height: 34px; font-size: 12px; }
+.sa-selected-group .sa-bot-picker { margin-bottom: 0; }
+.sa-topic-picker { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 8px; }
+.sa-topic-picker-label { color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 26px; }
+.sa-topic-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sa-topic-chip { max-width: 100%; height: 26px; padding: 0 9px; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font: inherit; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sa-topic-chip[data-selected='true'] { border-color: var(--dsw-alias-state-business-primary, #3370FF); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-state-business-primary, #3370FF); }
+.sa-topic-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); }
 .sa-selected-group { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-3); }
 .sa-selected-group-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .sa-selected-group-label { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 10px; }
@@ -451,6 +459,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-topic-inline-label { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .sa-topic-inline .sa-input { flex: 1 1 150px; height: 26px; }
 .sa-topic-inline-note { flex: 1 1 100%; color: var(--dsw-alias-label-quaternary); font-size: 10px; line-height: 14px; }
+.sa-bind-dialog { width: min(560px, 100%); }
 .sa-bindings-dialog { max-width: 520px; }
 .sa-binding-list { display: flex; flex-direction: column; gap: 2px; }
 .sa-binding-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 8px; border-radius: var(--dsw-radius-md); }
@@ -1198,7 +1207,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           ? new Date(topic.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' })
           : ''
         const title = topic.title.trim()
-        const base = title === '' || title === '话题' ? `${t('feishu.topicLabel')} ${index + 1}` : title
+        const base = title === '' || title === '话题' ? `${t('feishu.topicLabel')} ${index + 1}` : title.slice(0, 20)
         return time === '' ? base : `${base} · ${time}`
       }
       const submit = (): void => {
@@ -1206,7 +1215,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       }
       return h('div', { className: 'sa-overlay', onClick: onClose },
         h('div', {
-          className: 'sa-dialog',
+          className: 'sa-dialog sa-bind-dialog',
           role: 'dialog',
           'aria-modal': 'true',
           'aria-label': t('feishu.bindTitle'),
@@ -1217,10 +1226,9 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
             h('button', { type: 'button', className: 'sa-dialog-close', 'aria-label': t('feishu.cancel'), onClick: onClose }, '×'),
           ),
           h('div', { className: 'sa-dialog-desc' }, t('feishu.bindHint')),
-          h('div', { className: 'sa-dialog-desc' }, t('feishu.topicHint')),
           h('div', { className: 'sa-dialog-body' },
             h('input', {
-              className: 'sa-input',
+              className: 'sa-input sa-search',
               value: query,
               placeholder: t('feishu.search'),
               onChange: (event: { target: { value: string } }) => { setQuery(event.target.value) },
@@ -1248,15 +1256,23 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                       onChange: (event: { target: { value: string } }) => { onBotChange(event.target.value) },
                     }, availableBots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))),
                   ),
-                h('label', { className: 'sa-bot-picker' },
-                  h('span', null, t('feishu.topicLabel')),
-                  h('select', {
-                    className: 'sa-input',
-                    value: threadId,
-                    onChange: (event: { target: { value: string } }) => { setThreadId(event.target.value) },
-                  },
-                    h('option', { value: '' }, t('feishu.topicMain')),
-                    topics.map((topic, index) => h('option', { key: topic.threadId, value: topic.threadId }, topicLabel(topic, index))),
+                h('div', { className: 'sa-topic-picker' },
+                  h('span', { className: 'sa-topic-picker-label' }, t('feishu.topicLabel')),
+                  h('div', { className: 'sa-topic-chips' },
+                    h('button', {
+                      type: 'button',
+                      className: 'sa-topic-chip',
+                      'data-selected': threadId === '',
+                      onClick: () => { setThreadId('') },
+                    }, t('feishu.topicMain')),
+                    topics.map((topic, index) => h('button', {
+                      type: 'button',
+                      className: 'sa-topic-chip',
+                      key: topic.threadId,
+                      'data-selected': threadId === topic.threadId,
+                      title: topic.title,
+                      onClick: () => { setThreadId(topic.threadId) },
+                    }, topicLabel(topic, index))),
                   ),
                 ),
                 topicsLoading
@@ -1283,7 +1299,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                       h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                       h('span', { className: 'sa-chat-text' },
                         h('span', { className: 'sa-chat-name' }, chat.name),
-                        h('span', { className: 'sa-chat-id' }, chat.chatId),
                       ),
                       chat.botMember === false
                         ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true' }, t('feishu.botMissing'))
