@@ -245,13 +245,13 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-statusbar { display: flex; align-items: center; gap: 6px; padding: 9px 12px 0; }
         .ft-summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 5px 12px 7px; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
         .ft-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
-        .ft-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
-        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-breathe 7.2s ease-in-out infinite; will-change: opacity, transform; }
+        .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-size: 10px; line-height: 14px; white-space: nowrap; }
+        .ft-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
+        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-breathe 7.2s ease-in-out infinite; }
         .ft-conn.connecting .ft-live-dot { background: var(--dsw-alias-state-warning-primary, #D97706); animation: ft-live 1.6s ease-in-out infinite; }
         .ft-conn.offline .ft-live-dot { background: var(--dsw-alias-state-error-primary, #E5484D); }
         @keyframes ft-live { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-        @keyframes ft-breathe { 0%, 100% { opacity: .55; transform: scale(.86); box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); } 50% { opacity: 1; transform: scale(1.08); box-shadow: 0 0 6px 1px rgba(22, 163, 74, .28); } }
+        @keyframes ft-breathe { 0%, 100% { opacity: .78; } 50% { opacity: 1; } }
         @media (prefers-reduced-motion: reduce) { .ft-conn .ft-live-dot { animation: none; } }
         .ft-list { list-style: none; margin: 0; padding: 2px 6px 14px; overflow: auto; min-height: 0; }
         .ft-row { box-sizing: border-box; display: flex; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
