@@ -128,26 +128,9 @@ function TasksMark({ size = 16 }: { size?: number }): ReactNS.ReactElement {
   </svg>
 }
 
-/** Row status marker: soft tinted circle, no heavy outline noise. */
-function StatusMark({ status }: { status: TaskStatus }): ReactNS.ReactElement {
-  if (status === 'approval') {
-    return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-warning-primary, #D97706)" opacity=".12" />
-      <path d="M8 4.7v4.2" stroke="var(--dsw-alias-state-warning-primary, #D97706)" strokeWidth="1.6" strokeLinecap="round" />
-      <circle cx="8" cy="11.4" r=".9" fill="var(--dsw-alias-state-warning-primary, #D97706)" />
-    </svg>
-  }
-  if (status === 'running') {
-    return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-business-primary, #3370FF)" opacity=".10" />
-      <circle cx="8" cy="8" r="5.1" stroke="var(--dsw-alias-state-business-primary, #3370FF)" strokeWidth="1.4" opacity=".24" />
-      <circle cx="8" cy="8" r="1.9" fill="var(--dsw-alias-state-business-primary, #3370FF)" className="ft-pulse" />
-    </svg>
-  }
-  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-    <circle cx="8" cy="8" r="7" fill="var(--dsw-alias-state-success-primary, #16A34A)" opacity=".10" />
-    <path d="M5.1 8.1l1.9 1.9 3.9-4.1" stroke="var(--dsw-alias-state-success-primary, #16A34A)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity=".9" />
-  </svg>
+/** Pure status dot: color carries state; the label stays as a tooltip only. */
+function StatusMark({ status, label }: { status: TaskStatus; label: string }): ReactNS.ReactElement {
+  return <span className={`ft-status-dot ${status}`} role="img" aria-label={label} title={label} />
 }
 
 function taskOf(raw: unknown): TaskView | undefined {
@@ -257,7 +240,12 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-row { box-sizing: border-box; display: flex; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
         @media (hover: hover) { .ft-row:hover { background: var(--dsw-alias-interactive-bg-hover); } }
         .ft-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); }
-        .ft-status { flex: none; width: 16px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
+        .ft-status { flex: none; width: 14px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
+        .ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
+        .ft-status-dot.running { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-dot-breathe 3.4s ease-in-out infinite; }
+        .ft-status-dot.approval { background: var(--dsw-alias-state-warning-primary, #D97706); }
+        @keyframes ft-dot-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+        @media (prefers-reduced-motion: reduce) { .ft-status-dot.running { animation: none; } }
         .ft-pulse { animation: ft-pulse 1.5s ease-in-out infinite; }
         @keyframes ft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
         @media (prefers-reduced-motion: reduce) { .ft-pulse { animation: none; } }
@@ -311,7 +299,7 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
                 }, 0)
               }}
             >
-              <span className="ft-status"><StatusMark status={task.status} /></span>
+              <span className="ft-status"><StatusMark status={task.status} label={task.status === 'approval' ? t('statusApproval') : task.status === 'running' ? t('statusRunning') : t('statusIdle')} /></span>
               <span className="ft-body">
                 <span className="ft-line">
                   <span className="ft-title">{sessionDisplayTitle(row, id)}</span>
@@ -324,12 +312,9 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
                 {task.question !== '' && task.question !== sessionDisplayTitle(row, id)
                   ? <span className="ft-subject">{task.question}</span>
                   : null}
-                <span className="ft-meta">
-                  <span className="ft-status-label">{task.status === 'approval' ? t('statusApproval') : task.status === 'running' ? t('statusRunning') : t('statusIdle')}</span>
-                  {task.chatName !== '' && !sessionDisplayTitle(row, id).includes(task.chatName)
-                    ? <><span className="ft-sep">·</span><span>{task.chatName}</span></>
-                    : null}
-                </span>
+                {task.chatName !== '' && !sessionDisplayTitle(row, id).includes(task.chatName)
+                  ? <span className="ft-meta"><span>{task.chatName}</span></span>
+                  : null}
                 {task.status === 'approval' && task.approval !== ''
                   ? <span className="ft-approval">{task.approval}</span>
                   : null}
