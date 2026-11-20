@@ -14,6 +14,11 @@ export interface FeishuEvent {
   chatId: string
   chatType: string
   messageId: string
+  /** Actual topic thread id (omt_...); empty outside a topic. */
+  threadId: string
+  /** Reply-thread root message id (om_...); empty outside a reply thread. */
+  rootId: string
+  /** Legacy combined key (thread_id or root_id). */
   threadKey: string
   senderType: string
   senderId: string
@@ -58,6 +63,8 @@ export function readFeishuEvent(raw: unknown): FeishuEvent | undefined {
         chatId: typeof msg.chat_id === 'string' ? msg.chat_id : '',
         chatType: typeof msg.chat_type === 'string' ? msg.chat_type : '',
         messageId: typeof msg.message_id === 'string' ? msg.message_id : '',
+        threadId: typeof msg.thread_id === 'string' ? msg.thread_id : '',
+        rootId: typeof msg.root_id === 'string' ? msg.root_id : '',
         threadKey: typeof msg.thread_id === 'string' ? msg.thread_id : typeof msg.root_id === 'string' ? msg.root_id : '',
         senderType: typeof sender?.sender_type === 'string' ? sender.sender_type : '',
         senderId: typeof sender?.sender_id?.open_id === 'string' ? sender.sender_id.open_id : '',
@@ -84,6 +91,8 @@ export function readFeishuEvent(raw: unknown): FeishuEvent | undefined {
     chatId,
     chatType: typeof value.chat_type === 'string' ? value.chat_type : '',
     messageId,
+    threadId,
+    rootId,
     threadKey: threadId || rootId,
     senderType: typeof value.sender_type === 'string' ? value.sender_type : '',
     senderId: typeof value.sender_id === 'string' ? value.sender_id : '',
@@ -102,12 +111,12 @@ export function readFeishuEvent(raw: unknown): FeishuEvent | undefined {
  * Whether an event should reach the agent.
  * @param {ReturnType<typeof readFeishuEvent>} event
  * @param {ReturnType<import('./config.js').normalizeConfig>} config
- * @param {'chat' | 'thread'} routing
+ * @param {'chat' | 'topic' | 'thread'} routing
  */
 export function acceptEvent(
   event: FeishuEvent | undefined,
   config: { allowChats: string[]; botOpenId?: string },
-  routing: 'chat' | 'thread',
+  routing: 'chat' | 'topic' | 'thread',
   alreadyAllowed = false,
 ): boolean {
   if (event === undefined) return false
@@ -128,8 +137,13 @@ export function acceptEvent(
  * Binding key for one chat (and thread when routing per thread).
  * @param {string} chatId
  * @param {string} threadKey
- * @param {'chat' | 'thread'} routing
+ * @param {'chat' | 'topic' | 'thread'} routing
  */
-export function bindingKey(chatId: string, threadKey: string, routing: 'chat' | 'thread'): string {
-  return routing === 'thread' && threadKey !== '' ? `${chatId}::${threadKey}` : chatId
+export function bindingKey(chatId: string, threadKey: string, routing: 'chat' | 'topic' | 'thread'): string {
+  return routing !== 'chat' && threadKey !== '' ? `${chatId}::${threadKey}` : chatId
+}
+
+/** The thread id that should scope a binding for this routing mode. */
+export function routeThreadKey(event: Pick<FeishuEvent, 'threadId' | 'threadKey'>, routing: 'chat' | 'topic' | 'thread'): string {
+  return routing === 'topic' ? (event.threadId ?? '') : (event.threadKey ?? '')
 }

@@ -249,6 +249,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.failed': '操作失败：{error}',
       'feishu.artifacts': '会话产物',
       'feishu.chatCount': '{count} 个群',
+      'feishu.topicLabel': '话题',
       'feishu.groupHint': '查看绑定的会话',
       'feishu.groupDetail': '群绑定详情',
       'feishu.sessions': '已绑定的会话',
@@ -334,6 +335,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.failed': 'Action failed: {error}',
       'feishu.artifacts': 'Session artifacts',
       'feishu.chatCount': '{count} groups',
+      'feishu.topicLabel': 'Topic',
       'feishu.groupHint': 'View bound sessions',
       'feishu.groupDetail': 'Group bindings',
       'feishu.sessions': 'Bound sessions',
@@ -990,9 +992,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
       const boundGroups = new Map<string, FeishuBinding[]>()
       for (const binding of bound) {
-        const list = boundGroups.get(binding.chatId) ?? []
+        const key = `${binding.chatId}::${binding.threadId ?? ''}`
+        const list = boundGroups.get(key) ?? []
         list.push(binding)
-        boundGroups.set(binding.chatId, list)
+        boundGroups.set(key, list)
       }
       const privateGroups = [...boundGroups.values()].filter(bindings => bindings[0]?.chatType === 'p2p').length
       const groupGroups = boundGroups.size - privateGroups
@@ -1043,7 +1046,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 key: chatId,
                 role: 'button',
                 tabIndex: 0,
-                title: `${groupDisplayName(binding.chatName, binding.chatId)} · ${binding.chatId}`,
+                title: `${groupDisplayName(binding.chatName, binding.chatId)}${binding.threadId === undefined || binding.threadId === '' ? '' : ` · ${t('feishu.topicLabel')}`}`,
                 onClick: () => { onOpenGroup(binding) },
                 onKeyDown: (event: { key: string; preventDefault(): void }) => {
                   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -1055,7 +1058,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 h('span', { className: 'sa-text' },
                   h('span', { className: 'sa-feishu-name' }, isPrivate
                     ? t('feishu.privateWith', { name: binding.chatName === undefined || binding.chatName === '' ? (names === '' ? t('feishu.bot') : names) : binding.chatName })
-                    : groupDisplayName(binding.chatName, binding.chatId)),
+                    : `${groupDisplayName(binding.chatName, binding.chatId)}${binding.threadId === undefined || binding.threadId === '' ? '' : ` · ${t('feishu.topicLabel')}`}`),
                   h('span', { className: 'sa-feishu-meta' }, names === '' ? t('feishu.boundBots') : names),
                 ),
                 !isPrivate && binding.botMember === false

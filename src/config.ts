@@ -28,11 +28,13 @@ export interface Config {
   allowChats: string[]
   botId: string
   botOpenId?: string
+  /** Stable tenant-wide owner identity used to verify the owner is in a group. */
+  ownerUnionId?: string
   botName: string
   /** One entry per Feishu bot app; empty input becomes a single inherited bot. */
   bots: BotConfig[]
   agentPreset?: string
-  routing: 'chat' | 'thread'
+  routing: 'chat' | 'topic' | 'thread'
   replyInThread: boolean
   progress: boolean
   ackReaction: string
@@ -105,9 +107,10 @@ export function normalizeConfig(raw: unknown): Config {
     workspaceId: string('workspaceId') || undefined,
     allowChats: chats,
     botOpenId: string('botOpenId') || undefined,
+    ownerUnionId: string('ownerUnionId') || undefined,
     botName: string('botName', '飞书机器人'),
     agentPreset: string('agentPreset') || undefined,
-    routing: value.routing === 'thread' ? 'thread' : 'chat',
+    routing: value.routing === 'topic' || value.routing === 'thread' ? value.routing : 'chat',
     replyInThread: value.replyInThread !== false,
     /** Send a placeholder reply immediately and edit it into the final answer. */
     progress: value.progress !== false,

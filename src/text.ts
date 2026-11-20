@@ -22,6 +22,16 @@ export function sessionTitle(event: Pick<FeishuEvent, 'chatId'>, text = '', grou
   return `飞书·${suffix}`
 }
 
+/** Title for a topic session: group + first question. */
+export function topicSessionTitle(groupName: string, text = ''): string {
+  const group = groupName.trim()
+  const snippet = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, 18) : ''
+  if (group !== '' && snippet !== '') return `飞书·${group}·${snippet}`
+  if (group !== '') return `飞书·${group}·话题`
+  if (snippet !== '') return `飞书·话题·${snippet}`
+  return '飞书·话题'
+}
+
 /** Title for a direct chat: peer + bot identity. */
 export function privateSessionTitle(peerName: string, botName: string): string {
   const peer = peerName.trim()

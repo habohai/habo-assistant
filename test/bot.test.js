@@ -419,3 +419,47 @@ test('an outbound send claims the conversation and grants the sending bot', asyn
   }
 })
 
+
+
+test('a topic creates its own session instead of reusing the group session', async () => {
+  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  try {
+    const event = {
+      chatId: 'oc_1', chatType: 'group', messageId: 'om_topic', threadId: 'omt_topic', rootId: '',
+      threadKey: 'omt_topic', senderType: 'user', senderId: 'ou_1', messageType: 'text',
+      mentions: [{ id: 'ou_bot' }], content: 'topic question',
+    }
+    const sessionId = await bot.ensureSession('oc_1::omt_topic', event, 'topic question')
+    assert.equal(sessionId, 'ses_1')
+    assert.equal(bot.registry.get('oc_1::omt_topic')?.sessionId, 'ses_1')
+    assert.equal(bot.registry.get('oc_1'), undefined)
+    assert.equal(bot.inThread(event), true)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('outbound claim requires the owner in the group when ownerUnionId is set', async () => {
+  const { bot, stateDir } = await createBot({}, { ownerUnionId: 'on_owner' })
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    bot.cli.chatMemberUnionIds = async () => new Set(['on_other'])
+    bot.observeOutboundChat('ses_sender', {
+      type: 'tool/call',
+      data: { name: 'bash', arguments: JSON.stringify({ command: 'lark-cli im +messages-send --as bot --chat-id oc_1 --text hi' }) },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(bot.registry.get('oc_1'), undefined)
+    bot.cli.chatMemberUnionIds = async () => new Set(['on_owner'])
+    bot.observeOutboundChat('ses_sender', {
+      type: 'tool/call',
+      data: { name: 'bash', arguments: JSON.stringify({ command: 'lark-cli im +messages-send --as bot --chat-id oc_1 --text hi' }) },
+    })
+    await waitFor(() => bot.registry.get('oc_1')?.sessionId === 'ses_sender')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

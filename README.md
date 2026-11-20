@@ -52,6 +52,10 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
     allowChats:
       - oc_xxxxxxxxxxxxxxxx
     botOpenId: ou_xxxxxxxxxxxxxxxx
+    # 稳定用户标识；用于校验 owner 是否在群/话题中
+    ownerUnionId: on_xxxxxxxxxxxxxxxx
+    # chat：群主会话；topic：话题独立 session
+    routing: topic
     permissionPreset: workspace-write
     approveUsers:
       - ou_xxxxxxxxxxxxxxxx
@@ -59,6 +63,10 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 ```
 
 群名/私聊 peer 名和 bot 列表都来自缓存或 p2p 消息解析，不在源码里写死任何 open_id/chat_id。
+
+`routing: topic` 时，带 `thread_id` 的消息按话题建独立 session，回复自动在话题内；`root_id` 回复线程仍回退到群主会话。
+
+`ownerUnionId` 用于发消息认领时校验 owner 是否在群内；群成员接口无权限时会降级为“bot 在群”的校验并记录 warning。
 
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。
 

@@ -229,6 +229,30 @@ export class LarkCli {
     return chats.find(chat => chat.chatId === chatId)?.name ?? this.chatNames.get(chatId)
   }
 
+  /** Union ids of the users in a group (stable across bot apps). */
+  async chatMemberUnionIds(chatId: string): Promise<Set<string>> {
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+chat-members-list',
+          '--chat-id', chatId,
+          '--as', identity,
+          '--member-id-type', 'union_id',
+          '--page-all',
+          '--json',
+        ])
+        const parsed = JSON.parse(stdout) as { data?: { users?: Array<{ member_id?: unknown }> } }
+        return new Set((parsed.data?.users ?? [])
+          .map(user => user.member_id)
+          .filter((id): id is string => typeof id === 'string' && id !== ''))
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('cannot list group members')
+  }
+
   async reply(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
     if (this.dryRun) {
       this.logger?.info(`feishu-bot[dry-run]: reply to ${messageId}: ${text}`)

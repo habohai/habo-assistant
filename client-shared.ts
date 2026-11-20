@@ -20,6 +20,7 @@ export interface FeishuBinding {
   chatType?: 'group' | 'p2p'
   botId?: string
   botIds?: string[]
+  threadId?: string
   sessionId: string
   chatName?: string
   botMember?: boolean

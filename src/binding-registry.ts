@@ -231,8 +231,8 @@ export class BindingRegistry {
     return this.active.get(key)
   }
 
-  resolve(chatId: string, threadId: string, routing: 'chat' | 'thread'): BindingResolution {
-    const key = routing === 'thread' && threadId !== '' ? makeKey(chatId, threadId) : chatId
+  resolve(chatId: string, threadId: string, routing: 'chat' | 'topic' | 'thread'): BindingResolution {
+    const key = routing !== 'chat' && threadId !== '' ? makeKey(chatId, threadId) : chatId
     const current = this.active.get(key)
     if (current?.sessionId !== undefined) {
       return current.source === 'manual' || current.source === 'external' || current.source === 'outbound'
@@ -383,7 +383,7 @@ export class BotBindings {
     return this.registry.get(key)
   }
 
-  resolve(chatId: string, threadId: string, routing: 'chat' | 'thread'): BindingResolution {
+  resolve(chatId: string, threadId: string, routing: 'chat' | 'topic' | 'thread'): BindingResolution {
     return this.registry.resolve(chatId, threadId, routing)
   }
 

@@ -4,6 +4,7 @@ import {
   acceptEvent,
   bindingKey,
   cleanMessageText,
+  routeThreadKey,
   configProblem,
   normalizeConfig,
   readFeishuEvent,
@@ -22,6 +23,8 @@ test('normalizeConfig applies safe defaults', () => {
   assert.equal(config.maxReplyChars, 3500)
   assert.deepEqual(config.allowChats, [])
   assert.equal(normalizeConfig({ routing: 'thread' }).routing, 'thread')
+  assert.equal(normalizeConfig({ routing: 'topic' }).routing, 'topic')
+  assert.equal(normalizeConfig({ ownerUnionId: ' on_owner ' }).ownerUnionId, 'on_owner')
   assert.deepEqual(normalizeConfig({ allowChats: [' oc_1 ', '', 3] }).allowChats, ['oc_1'])
 })
 
@@ -50,6 +53,8 @@ test('readFeishuEvent flattens the CLI event', () => {
   assert.equal(event.chatId, 'oc_1')
   assert.equal(event.messageId, 'om_1')
   assert.equal(event.threadKey, 'om_root')
+  assert.equal(event.threadId, '')
+  assert.equal(event.rootId, 'om_root')
   assert.equal(event.senderId, 'ou_1')
   assert.deepEqual(event.mentions, [{ id: 'ou_bot' }])
   assert.equal(readFeishuEvent({ chat_id: 'oc_1' }), undefined)
@@ -95,10 +100,13 @@ test('acceptEvent filters chats, senders, and types', () => {
   assert.equal(acceptEvent(base, pinned, 'chat'), true)
 })
 
-test('bindingKey isolates threads only in thread routing', () => {
+test('bindingKey isolates threads in topic/thread routing', () => {
   assert.equal(bindingKey('oc_1', 'om_t', 'chat'), 'oc_1')
   assert.equal(bindingKey('oc_1', 'om_t', 'thread'), 'oc_1::om_t')
-  assert.equal(bindingKey('oc_1', '', 'thread'), 'oc_1')
+  assert.equal(bindingKey('oc_1', 'om_t', 'topic'), 'oc_1::om_t')
+  assert.equal(bindingKey('oc_1', '', 'topic'), 'oc_1')
+  assert.equal(routeThreadKey({ threadId: 'omt_t', threadKey: 'omr' }, 'topic'), 'omt_t')
+  assert.equal(routeThreadKey({ threadId: 'omt_t', threadKey: 'omr' }, 'thread'), 'omr')
 })
 
 test('splitReply respects the limit and line boundaries', () => {

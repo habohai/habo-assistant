@@ -33,13 +33,13 @@ import { parseApprovalReply } from './src/approval.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
 import { SeenStore } from './src/dedup.js'
-import { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
+import { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent, routeThreadKey } from './src/event.js'
 import { LarkCli } from './src/lark.js'
 import { Metrics } from './src/metrics.js'
 import { ChatDirectory } from './src/chat-directory.js'
 import { artifactsProjection } from './src/artifacts-projection.js'
 import { taskProjection } from './src/task-projection.js'
-import { isStopCommand, privateSessionTitle, sessionTitle, splitReply } from './src/text.js'
+import { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle } from './src/text.js'
 import { KeyedQueue } from './src/work.js'
 
 /** Feishu event key consumed by the bot. */
@@ -56,10 +56,10 @@ export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
-export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent } from './src/event.js'
+export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent, routeThreadKey } from './src/event.js'
 export { LarkCli, parseMessageId } from './src/lark.js'
 export { Metrics, percentile } from './src/metrics.js'
-export { isStopCommand, privateSessionTitle, sessionTitle, splitReply } from './src/text.js'
+export { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle } from './src/text.js'
 export { KeyedQueue, Semaphore } from './src/work.js'
 export { taskProjection } from './src/task-projection.js'
 export { artifactsProjection } from './src/artifacts-projection.js'
@@ -111,7 +111,7 @@ interface ApprovalEntry {
 export class FeishuBot {
   readonly ctx: HostContext
   readonly config: Config
-  private readonly routing: 'chat' | 'thread'
+  private readonly routing: 'chat' | 'topic' | 'thread'
   readonly registry: BotBindings
   readonly seen: SeenStore
   readonly metrics: Metrics
@@ -397,7 +397,7 @@ export class FeishuBot {
       this.fireReply(event, '请描述你的问题。')
       return
     }
-    const key = bindingKey(event.chatId, event.threadKey, this.routing)
+    const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     if (!this.queue.push(key, { event, text, enqueuedAt: Date.now() })) {
       this.metrics.inc('queueRejected')
       this.fireReply(event, '当前排队较多，请稍后再试。')
@@ -445,7 +445,7 @@ export class FeishuBot {
   }
 
   inThread(event: FeishuEvent): boolean {
-    return this.config.replyInThread && event.threadKey !== ''
+    return (this.routing === 'topic' && typeof event.threadId === 'string' && event.threadId !== '') || (this.config.replyInThread && typeof event.threadKey === 'string' && event.threadKey !== '')
   }
 
   /** Track one owned session so command approvals can be routed to its chat. */
@@ -604,6 +604,19 @@ export class FeishuBot {
     try {
       const info = await this.cli.chatInfo(chatId)
       if (info?.botMember !== true) return
+      if (this.config.ownerUnionId !== undefined && this.config.ownerUnionId !== '') {
+        try {
+          const members = await this.cli.chatMemberUnionIds(chatId)
+          if (!members.has(this.config.ownerUnionId)) {
+            this.ctx.logger.warn(`feishu-bot: outbound claim rejected: owner is not in ${chatId}`)
+            return
+          }
+        } catch (error) {
+          // Member-read scope is optional; do not turn a missing scope into a
+          // broken conversation. The bot itself must still be in the group.
+          this.ctx.logger.warn(`feishu-bot: cannot verify owner membership in ${chatId}: ${String(error)}`)
+        }
+      }
       const key = bindingKey(chatId, '', this.routing)
       const current = this.registry.get(key)
       if (current?.sessionId !== sessionId || !this.registry.hasGrant(key)) {
@@ -642,7 +655,7 @@ export class FeishuBot {
   }
 
   /** Session-facing binding list with resolved group names. */
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean; threadId: string }>> {
     // Refresh the directory once per snapshot, then resolve every binding from it.
     const byId = new Map((await this.cli.listChats(force)).map(chat => [chat.chatId, chat]))
     const summaries = await Promise.all(this.registry.entries().map(async ([key, record]) => {
@@ -661,6 +674,7 @@ export class FeishuBot {
         boundAt: record.at,
         ...(info === undefined || info.name === '' ? peer === undefined ? {} : { chatName: peer } : { chatName: info.name }),
         botMember: info?.botMember === true || p2p,
+        threadId: record.threadId ?? '',
       }]
     }))
     return summaries.flat()
@@ -786,7 +800,7 @@ export class FeishuBot {
 
   /** Cancel the running turn and drop this chat's queued jobs. */
   stopChat(event: FeishuEvent): void {
-    const key = bindingKey(event.chatId, event.threadKey, this.routing)
+    const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     const sessionId = this.registry.get(key)?.sessionId
     let stopped = false
     if (this.approvals.has(event.chatId)) {
@@ -1122,7 +1136,9 @@ export class FeishuBot {
       const groupName = await this.chatName(event.chatId)
       const title = event.chatType === 'p2p'
         ? privateSessionTitle((await this.cli.peerName(event.chatId)) ?? '', this.config.botName)
-        : sessionTitle(event, text, groupName ?? '')
+        : this.routing === 'topic' && typeof event.threadId === 'string' && event.threadId !== ''
+          ? topicSessionTitle(groupName ?? '', text)
+          : sessionTitle(event, text, groupName ?? '')
       this.privateTitles.set(sessionId, title)
       await this.ctx.sessionController.rename({ sessionId, title })
     } catch {
@@ -1146,7 +1162,7 @@ export class FeishuBot {
   }
 
   async ensureSession(key: string, event: FeishuEvent, text: string): Promise<string> {
-    const resolution = this.registry.resolve(event.chatId, event.threadKey, this.routing)
+    const resolution = this.registry.resolve(event.chatId, routeThreadKey(event, this.routing), this.routing)
     const known = 'sessionId' in resolution ? resolution.sessionId : undefined
     const workspace = this.workspace()
     if (event.chatType === 'p2p'
@@ -1159,6 +1175,11 @@ export class FeishuBot {
     if (event.chatType === 'p2p' && known !== undefined
       && (resolution.kind === 'explicit' || resolution.kind === 'auto')) {
       void this.refreshPrivateTitle(known, event.chatId)
+    }
+    if (event.chatType === 'group' && this.routing === 'topic' && typeof event.threadId === 'string' && event.threadId !== ''
+      && (resolution.kind === 'none' || resolution.kind === 'candidate')) {
+      // A topic is its own conversation lane, never the group's main Session.
+      return this.createSessionForChat(key, event, text)
     }
 
     if (known !== undefined && resolution.kind === 'explicit') {
@@ -1356,7 +1377,7 @@ export class BotHost {
     }
   }
 
-  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean }>> {
+  async bindingSummaries(force = false): Promise<Array<{ chatId: string; chatType: 'group' | 'p2p'; botId: string; botIds: string[]; sessionId: string; source: string; boundAt: number; chatName?: string; botMember: boolean; threadId: string }>> {
     return this.primary.bindingSummaries(force)
   }
 
