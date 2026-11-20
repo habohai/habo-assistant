@@ -965,10 +965,16 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const boundBotIds = [...new Set(bound.map(binding => binding.botId).filter((id): id is string => id !== undefined))]
       const botLabel = boundBotIds.map(id => botById.get(id) ?? id).join(' / ')
       const botNameOf = (botId?: string): string => botId === undefined ? '' : (botById.get(botId) ?? botId)
+      const boundGroups = new Map<string, FeishuBinding[]>()
+      for (const binding of bound) {
+        const list = boundGroups.get(binding.chatId) ?? []
+        list.push(binding)
+        boundGroups.set(binding.chatId, list)
+      }
       return h('section', { className: 'sa-feishu' },
         h('div', { className: 'sa-feishu-head' },
           h('span', { className: 'sa-feishu-title' }, t('feishu.title')),
-          bound.length === 0 ? null : h('span', { className: 'sa-feishu-total' }, t('feishu.chatCount', { count: String(bound.length) })),
+          boundGroups.size === 0 ? null : h('span', { className: 'sa-feishu-total' }, t('feishu.chatCount', { count: String(boundGroups.size) })),
           h('span', { className: 'sa-feishu-actions' },
             h('button', {
               type: 'button',
@@ -990,11 +996,14 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           ? h('div', { className: 'sa-feishu-note' }, t('feishu.loading'))
           : error !== ''
             ? h('div', { className: 'sa-feishu-empty' }, t('feishu.missing'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.missingHint')))
-            : bound.length === 0
+            : boundGroups.size === 0
               ? h('div', { className: 'sa-feishu-empty' }, t('feishu.empty'), h('span', { className: 'sa-feishu-empty-hint' }, t('feishu.emptyHint')))
-              : h('div', null, bound.map(binding => h('div', {
+              : h('div', null, [...boundGroups.entries()].map(([chatId, bindings]) => {
+                const binding = bindings[0]
+                const names = bindings.map(item => botNameOf(item.botId)).filter(name => name !== '').join(' / ')
+                return h('div', {
                 className: 'sa-feishu-row',
-                key: `${binding.botId ?? ''}:${binding.chatId}`,
+                key: chatId,
                 role: 'button',
                 tabIndex: 0,
                 title: t('feishu.groupHint'),
@@ -1008,7 +1017,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
                   h('span', { className: 'sa-feishu-name' }, groupDisplayName(binding.chatName, binding.chatId)),
-                  h('span', { className: 'sa-feishu-id', title: binding.botId }, binding.botId === undefined || botNameOf(binding.botId) === '' ? binding.chatId : `${binding.chatId} · ${botNameOf(binding.botId)}`),
+                  h('span', { className: 'sa-feishu-id' }, names === '' ? binding.chatId : `${binding.chatId} · ${names}`),
                 ),
                 binding.botMember === false
                   ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true', title: t('feishu.botMissingHint') }, t('feishu.botMissing'))
@@ -1020,11 +1029,12 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                   'aria-label': t('feishu.unbind'),
                   onClick: (event: { stopPropagation(): void }) => {
                     event.stopPropagation()
-                    onUnbind(binding.chatId, binding.botId)
+                    onUnbind(chatId)
                   },
                 }, t('feishu.unbind')),
                 h('span', { className: 'sa-feishu-chevron', 'aria-hidden': true }, '›'),
-              ))),
+              )
+            })),
         actionError === '' ? null : h('div', { className: 'sa-dialog-error' }, t('feishu.failed', { error: actionError })),
       )
     }
