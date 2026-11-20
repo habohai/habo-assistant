@@ -588,3 +588,22 @@ test('a plain reply claims the group main conversation', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('reading group messages claims the conversation', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Test group', botMember: true })
+    const decision = await bot.outboundGate({
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'lark-cli im +chat-messages-list --chat-id oc_1 --as user' }),
+      agent: { session: { id: 'ses_reader' } },
+    })
+    assert.equal(decision.kind, 'allow')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_reader')
+    assert.equal(bot.registry.get('oc_1')?.source, 'read')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

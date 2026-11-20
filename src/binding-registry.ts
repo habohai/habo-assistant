@@ -9,7 +9,7 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-export type BindingSource = 'external' | 'manual' | 'auto' | 'outbound'
+export type BindingSource = 'external' | 'manual' | 'auto' | 'outbound' | 'read'
 export type BindingState = 'active' | 'replaced' | 'unbound' | 'candidate'
 
 export interface BindingRecord {
@@ -45,7 +45,7 @@ function makeKey(chatId: string, threadId: string): string {
 }
 
 function isSource(value: unknown): value is BindingSource {
-  return value === 'manual' || value === 'external' || value === 'auto' || value === 'outbound'
+  return value === 'manual' || value === 'external' || value === 'auto' || value === 'outbound' || value === 'read'
 }
 
 export class BindingRegistry {
@@ -235,7 +235,7 @@ export class BindingRegistry {
     const key = routing !== 'chat' && threadId !== '' ? makeKey(chatId, threadId) : chatId
     const current = this.active.get(key)
     if (current?.sessionId !== undefined) {
-      return current.source === 'manual' || current.source === 'external' || current.source === 'outbound'
+      return current.source === 'manual' || current.source === 'external' || current.source === 'outbound' || current.source === 'read'
         ? { kind: 'explicit', sessionId: current.sessionId, source: current.source, at: current.at, key }
         : { kind: 'auto', sessionId: current.sessionId, source: current.source, at: current.at, key }
     }

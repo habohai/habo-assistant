@@ -618,7 +618,11 @@ export class FeishuBot {
     const call = exec as { name?: unknown; arguments?: unknown; agent?: { session?: { id?: unknown } } } | undefined
     const command = this.bashCommand(call)
     if (command === '' || !command.includes('lark-cli')) return undefined
-    if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return undefined
+    const asUser = /(?:^|\s)--as(?:\s+|=)user\b/.test(command)
+    const isRead = command.includes('+chat-messages-list')
+      || command.includes('+messages-mget')
+      || command.includes('+messages-search')
+    if (asUser && !isRead) return undefined
     const profile = /(?:^|\s)--profile(?:\s+|=)([^\s]+)/.exec(command)?.[1]
     if (profile !== undefined) {
       if (profile !== this.config.larkProfile) return undefined
@@ -627,6 +631,7 @@ export class FeishuBot {
     }
     const sessionId = call?.agent?.session?.id
     if (typeof sessionId !== 'string' || sessionId === '') return undefined
+    if (isRead) return this.gateRead(command, sessionId)
     if (command.includes('+messages-send')) {
       const chatId = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)?.[1]
       if (chatId === undefined) return undefined
@@ -643,7 +648,25 @@ export class FeishuBot {
     return undefined
   }
 
-  private async gateOutbound(chatId: string, threadId: string, sessionId: string): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string }> {
+  private async gateRead(command: string, sessionId: string): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string }> {
+    if (command.includes('+messages-mget')) {
+      const raw = /--message-ids(?:\s+|=)([^\s]+)/.exec(command)?.[1] ?? ''
+      const messageIds = raw.split(',').map(id => id.trim()).filter(id => /^om_[A-Za-z0-9]+$/.test(id)).slice(0, 5)
+      let denied: { kind: 'deny'; reason: string } | undefined
+      for (const messageId of messageIds) {
+        const context = await this.cli.messageContext(messageId).catch(() => undefined)
+        if (context === undefined) continue
+        const result = await this.gateOutbound(context.chatId, context.threadId, sessionId, 'read')
+        if (result.kind === 'deny') denied = result
+      }
+      return denied ?? { kind: 'allow' }
+    }
+    const chatId = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)?.[1]
+    if (chatId === undefined) return { kind: 'allow' }
+    return this.gateOutbound(chatId, '', sessionId, 'read')
+  }
+
+  private async gateOutbound(chatId: string, threadId: string, sessionId: string, source: 'outbound' | 'read' = 'outbound'): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string }> {
     try {
       const info = await this.cli.chatInfo(chatId)
       if (info?.botMember !== true) return { kind: 'allow' }
@@ -657,7 +680,7 @@ export class FeishuBot {
           this.ctx.logger.warn(`feishu-bot: cannot verify owner membership in ${chatId}: ${String(error)}`)
         }
       }
-      await this.claimOutbound(chatId, threadId, sessionId, Date.now())
+      await this.claimOutbound(chatId, threadId, sessionId, Date.now(), source)
       return { kind: 'allow' }
     } catch (error) {
       this.ctx.logger.warn(`feishu-bot: outbound gate skipped for ${chatId}: ${String(error)}`)
@@ -679,6 +702,21 @@ export class FeishuBot {
     }
     if (/(?:^|\s)--as(?:\s+|=)user\b/.test(command)) return
     const at = typeof event.time === 'number' ? event.time : Date.now()
+    if (command.includes('+chat-messages-list') || command.includes('+messages-search')) {
+      const chatId = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)?.[1]
+      if (chatId !== undefined) void this.claimOutbound(chatId, '', sessionId, at, 'read')
+      return
+    }
+    if (command.includes('+messages-mget')) {
+      const raw = /--message-ids(?:\s+|=)([^\s]+)/.exec(command)?.[1] ?? ''
+      const messageIds = raw.split(',').map(id => id.trim()).filter(id => /^om_[A-Za-z0-9]+$/.test(id)).slice(0, 5)
+      for (const messageId of messageIds) {
+        void this.cli.messageContext(messageId)
+          .then(context => context === undefined ? undefined : this.claimOutbound(context.chatId, context.threadId, sessionId, at, 'read'))
+          .catch(() => undefined)
+      }
+      return
+    }
     if (command.includes('+messages-send')) {
       const match = /--chat-id(?:\s+|=)(oc_[A-Za-z0-9]+)/.exec(command)
       if (match === null) return
@@ -707,7 +745,7 @@ export class FeishuBot {
    * A bot message sent from a Session claims the conversation: the conversation
    * binds to that Session, and the sending bot is lazily granted.
    */
-  private async claimOutbound(chatId: string, threadId: string, sessionId: string, at: number): Promise<void> {
+  private async claimOutbound(chatId: string, threadId: string, sessionId: string, at: number, source: 'outbound' | 'read' = 'outbound'): Promise<void> {
     try {
       const info = await this.cli.chatInfo(chatId)
       if (info?.botMember !== true) return
@@ -727,8 +765,8 @@ export class FeishuBot {
       const key = bindingKey(chatId, threadId, this.routing)
       const current = this.registry.get(key)
       if (current?.sessionId !== sessionId || !this.registry.hasGrant(key)) {
-        await this.setBinding(key, sessionId, 'outbound')
-        this.ctx.logger.info(`feishu-bot: outbound claim ${key} -> ${sessionId} via ${this.config.botName}`)
+        await this.setBinding(key, sessionId, source)
+        this.ctx.logger.info(`feishu-bot: ${source} claim ${key} -> ${sessionId} via ${this.config.botName}`)
       }
       await this.recordChatAffinity(chatId, sessionId, at)
       this.trackSession(sessionId, chatId)
@@ -1086,7 +1124,7 @@ export class FeishuBot {
   }
 
   /** Write the authoritative binding and its display history together. */
-  private async setBinding(key: string, sessionId: string, source: 'auto' | 'manual' | 'external' | 'outbound'): Promise<void> {
+  private async setBinding(key: string, sessionId: string, source: 'auto' | 'manual' | 'external' | 'outbound' | 'read'): Promise<void> {
     const index = key.indexOf('::')
     const chatId = index === -1 ? key : key.slice(0, index)
     const threadId = index === -1 ? '' : key.slice(index + 2)

@@ -265,6 +265,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.source.external': '外部绑定',
       'feishu.source.auto': '自动绑定',
       'feishu.source.outbound': '发消息认领',
+      'feishu.source.read': '读消息认领',
     }
 
     /** English copy (same key set). */
@@ -353,6 +354,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       'feishu.source.external': 'External',
       'feishu.source.auto': 'Automatic',
       'feishu.source.outbound': 'Outbound claim',
+      'feishu.source.read': 'Read claim',
     }
 
     const CSS = `
