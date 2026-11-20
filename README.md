@@ -21,13 +21,22 @@
 - **任务**：全局飞书任务列表，显示 Session 名、最后问题、状态（思考中/待审批/思考完成）、连接状态；
 - **会话信息**：当前 Session 的飞书群绑定/解绑、群绑定历史，以及本 Session 的产物树。
 
+## 工具链
+
+仓库根目录的 `.mise.toml` 固定了 node / pnpm / python / uv；`package.json` 的 `packageManager` 也固定为 `pnpm@12.6.0`。
+
+```bash
+mise install
+pnpm install
+```
+
 ## 安装 / 配置
 
 本地 build 后把目录作为 bundle 安装：
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm run build
 ```
 
 profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
@@ -100,9 +109,9 @@ bots:
 ## 开发
 
 ```bash
-npm run typecheck
-npm run build
-npm test
+pnpm run typecheck
+pnpm run build
+pnpm test
 ```
 
 原 `dsh-feishu-bot` 与 `dsh-session-artifacts` 仓库保留；本包是合并后的新实现。
