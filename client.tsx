@@ -239,10 +239,11 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ft-conn { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .18)); border-radius: 999px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 14px; white-space: nowrap; }
         .ft-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
-        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); }
+        .ft-conn.ready .ft-live-dot { background: var(--dsw-alias-state-success-primary, #16A34A); animation: ft-live-ready 2.4s ease-in-out infinite; }
         .ft-conn.connecting .ft-live-dot { background: var(--dsw-alias-state-warning-primary, #D97706); animation: ft-live 1.6s ease-in-out infinite; }
         .ft-conn.offline .ft-live-dot { background: var(--dsw-alias-state-error-primary, #E5484D); }
         @keyframes ft-live { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+        @keyframes ft-live-ready { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(22, 163, 74, .26); } 50% { opacity: .72; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0); } }
         @media (prefers-reduced-motion: reduce) { .ft-conn .ft-live-dot { animation: none; } }
         .ft-list { list-style: none; margin: 0; padding: 2px 6px 14px; overflow: auto; min-height: 0; }
         .ft-row { box-sizing: border-box; display: flex; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
