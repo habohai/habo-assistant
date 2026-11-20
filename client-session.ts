@@ -379,11 +379,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-feishu-title { flex: none; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 18px; }
 .sa-feishu-total { flex: none; color: var(--dsw-alias-label-quaternary); font-size: 11px; line-height: 16px; }
 .sa-feishu-bot { padding: 0 8px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
-.sa-feishu-bots { padding: 0 8px 4px; }
-.sa-feishu-bots-label { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
-.sa-feishu-bot-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
-.sa-feishu-bot-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
-.sa-feishu-bot-item::before { content: '·'; margin-right: 5px; color: var(--dsw-alias-label-quaternary); }
+.sa-feishu-bots { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 0 8px 6px; }
+.sa-feishu-bots-label { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+.sa-feishu-bot-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sa-feishu-bot-item { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 7px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 999px; background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 18px; }
 .sa-feishu-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
 .sa-feishu-bind { display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font: inherit; font-size: 11px; white-space: nowrap; }
 @media (hover: hover) { .sa-feishu-bind:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); } }
@@ -392,6 +391,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 @media (hover: hover) { .sa-feishu-row:hover { background: var(--dsw-alias-interactive-bg-hover); } }
 .sa-feishu-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 18px; }
 .sa-feishu-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-quaternary); font-size: 11px; line-height: 16px; }
+.sa-feishu-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
 .sa-feishu-remove { display: grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; font: inherit; font-size: 14px; line-height: 1; opacity: 0; }
 @media (hover: hover) { .sa-feishu-row:hover .sa-feishu-remove, .sa-feishu-row:focus-within .sa-feishu-remove { opacity: 1; } .sa-feishu-remove:hover { background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-primary); } }
 @media (hover: none) { .sa-feishu-remove { opacity: 1; } }
@@ -1020,7 +1020,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 key: chatId,
                 role: 'button',
                 tabIndex: 0,
-                title: t('feishu.groupHint'),
+                title: `${groupDisplayName(binding.chatName, binding.chatId)} · ${binding.chatId}`,
                 onClick: () => { onOpenGroup(binding) },
                 onKeyDown: (event: { key: string; preventDefault(): void }) => {
                   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -1031,7 +1031,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
                 h('span', { className: 'sa-avatar', 'aria-hidden': true }, h(GroupGlyph)),
                 h('span', { className: 'sa-text' },
                   h('span', { className: 'sa-feishu-name' }, groupDisplayName(binding.chatName, binding.chatId)),
-                  h('span', { className: 'sa-feishu-id' }, names === '' ? binding.chatId : `${binding.chatId} · ${names}`),
+                  h('span', { className: 'sa-feishu-meta' }, names === '' ? t('feishu.boundBots') : names),
                 ),
                 binding.botMember === false
                   ? h('span', { className: 'sa-chat-badge', 'data-warning': 'true', title: t('feishu.botMissingHint') }, t('feishu.botMissing'))
@@ -1336,7 +1336,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const { getTriggerProps } = useContextMenu()
       const [closedSections, setClosedSections] = useState<Record<string, boolean>>({})
       const [closedDirs, setClosedDirs] = useState<Record<string, boolean>>({})
-      const feishu = useFeishuStatus(React, { refresh: true })
+      const feishu = useFeishuStatus(React)
       const [bindOpen, setBindOpen] = useState(false)
       const [chats, setChats] = useState<FeishuChat[]>([])
       const [chatsLoading, setChatsLoading] = useState(false)
@@ -1356,7 +1356,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const loadChats = (): void => {
         setChatsLoading(true)
         setChatsError('')
-        fetchFeishuApi<{ chats: FeishuChat[] }>(`${FEISHU_API}?action=chats&refresh=1`)
+        fetchFeishuApi<{ chats: FeishuChat[] }>(`${FEISHU_API}?action=chats`)
           .then(value => { setChats(Array.isArray(value.chats) ? value.chats : []) })
           .catch(reason => {
             setChats([])

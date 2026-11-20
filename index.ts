@@ -192,6 +192,7 @@ export class FeishuBot {
       this.ctx.logger.warn(`feishu-bot: ${problem}; consumer not started`)
       return
     }
+    void this.cli.listChats().catch(error => this.ctx.logger.debug(`feishu-bot: chat prefetch failed: ${String(error)}`))
     this.canEdit = await this.cli.supportsEdit()
     if (this.config.progress && !this.canEdit) {
       this.ctx.logger.warn('feishu-bot: lark-cli cannot edit messages (+messages-edit, needs >= 1.0.100); placeholder replies are disabled')
@@ -674,7 +675,7 @@ export class FeishuBot {
     botMember: boolean
     sessions: Array<{ sessionId: string; at: number; source: string; current: boolean }>
   }> {
-    const info = await this.cli.chatInfo(chatId, true)
+    const info = await this.cli.chatInfo(chatId)
     const active = new Map<string, { source: string; at: number }>()
     for (const [key, record] of this.registry.entries()) {
       if (key !== chatId && !key.startsWith(`${chatId}::`)) continue
@@ -1536,6 +1537,10 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   const method = req.method ?? 'GET'
   const refresh = url.searchParams.get('refresh') === '1'
   if (method === 'GET') {
+    if (url.searchParams.get('action') === 'health') {
+      sendJson(res, 200, { ok: true, value: bot.status() })
+      return
+    }
     if (url.searchParams.get('action') === 'chats') {
       sendJson(res, 200, { ok: true, value: { chats: await bot.availableChats(refresh) } })
       return

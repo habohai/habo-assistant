@@ -15,7 +15,7 @@
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 64 * 1024
-const CHAT_LIST_TTL_MS = 30_000
+const CHAT_LIST_TTL_MS = 5 * 60_000
 
 export interface ChatSummary {
   chatId: string
