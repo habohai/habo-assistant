@@ -406,6 +406,10 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
 .sa-input:focus { border-color: var(--dsw-alias-state-business-primary); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-state-business-primary); }
 .sa-bot-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .sa-bot-picker .sa-input { flex: 1; }
+.sa-group-bots { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 8px; }
+.sa-group-bot { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.sa-group-bot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-group-bot-state { color: var(--dsw-alias-state-success-primary); }
 .sa-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; min-height: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .sa-chat { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 7px 8px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
 @media (hover: hover) { .sa-chat:hover { background: var(--dsw-alias-interactive-bg-hover); } }
@@ -1249,8 +1253,19 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
           h('div', { className: 'sa-dialog-desc' }, group === undefined ? t('feishu.groupDetail') : `${group.chatId}${group.botMember ? '' : ` · ${t('feishu.botMissing')}`}`),
           group?.bots === undefined || group.bots.length === 0
             ? null
-            : h('div', { className: 'sa-dialog-desc' },
-              `${t('feishu.botLabel')}: ${group.bots.filter(bot => bot.member).map(bot => `${bot.name}${bot.bound ? ' ✓' : ''}`).join(' / ')}`),
+            : h('div', { className: 'sa-group-bots' },
+              group.bots.filter(bot => bot.member).map(bot => h('div', { className: 'sa-group-bot', key: bot.id },
+                h('span', { className: 'sa-group-bot-name' }, bot.name),
+                h('span', { className: 'sa-group-bot-state' }, bot.bound ? '✓' : ''),
+                bot.bound
+                  ? h('button', {
+                    type: 'button',
+                    className: 'sa-button',
+                    disabled: busy,
+                    onClick: () => { onUnbind(group.chatId, bot.id) },
+                  }, t('feishu.unbind'))
+                  : null,
+              ))),
           h('div', { className: 'sa-dialog-body' },
             loading
               ? h('div', { className: 'sa-dialog-empty' }, t('feishu.loading'))
