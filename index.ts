@@ -600,7 +600,18 @@ export class FeishuBot {
 
   /** Gate lark-cli sends before dispatch: validate and claim the conversation first. */
   installOutboundGate(): void {
-    this.ctx.on('tools/pre-execute', (exec: unknown) => this.outboundGate(exec) as Promise<any>, { prepend: true })
+    this.ctx.on('tools/pre-execute', (exec: unknown, next: () => Promise<any>) => this.preExecute(exec, next), { prepend: true })
+  }
+
+  /**
+   * Run our outbound gate, then continue the DSH waterfall for tools we do not
+   * own. A bare `undefined` here breaks the pipeline because DSH reads
+   * `decision.kind`; always hand an explicit decision to the next listener.
+   */
+  async preExecute(exec: unknown, next: () => Promise<any>): Promise<any> {
+    const decision = await this.outboundGate(exec)
+    if (decision?.kind === 'deny') return decision
+    return next()
   }
 
   private async outboundGate(exec: unknown): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string } | undefined> {

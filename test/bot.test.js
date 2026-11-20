@@ -550,3 +550,19 @@ test('pre-send gate claims a group and denies an owner outside it', async () => 
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('pre-execute continues the waterfall for non-lark tools', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    let continued = false
+    const decision = await bot.preExecute({ name: 'read', arguments: '{}' }, async () => {
+      continued = true
+      return { kind: 'allow' }
+    })
+    assert.equal(continued, true)
+    assert.equal(decision.kind, 'allow')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
