@@ -328,6 +328,13 @@ export class BotBindings {
     return this.registry.listByChat(chatId, includeCandidates, this.botId)
   }
 
+  /** All bot ids (including this one) currently bound to the chat. */
+  peersForChat(chatId: string): string[] {
+    return [...new Set(this.registry.entries()
+      .filter(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+      .map(([, record]) => record.botId))]
+  }
+
   candidateFor(chatId: string): BindingRecord | undefined {
     return this.registry.candidateFor(chatId, this.botId)
   }

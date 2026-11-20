@@ -1155,9 +1155,11 @@ export class FeishuBot {
       }, this.config.timeoutMs)
       pending.timer.unref?.()
       this.pending.set(sessionId, pending)
+      const peers = this.registry.peersForChat(event.chatId)
+      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peers.length}`}`
       const header = groupName === undefined || groupName === ''
-        ? `[飞书群:${event.chatId} | 提问人:${event.senderId || 'unknown'}]\n${text}`
-        : `[飞书群:${groupName} | 群ID:${event.chatId} | 提问人:${event.senderId || 'unknown'}]\n${text}`
+        ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
+        : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
       this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId,
@@ -1331,6 +1333,19 @@ export class BotHost {
     }
   }
 
+  bindingsForChat(chatId: string): Array<{ chatId: string; botId: string; botName: string; sessionId: string; source: string; at: number }> {
+    return this.bots.flatMap(bot => bot.registry.entries()
+      .filter(([key]) => key === chatId || key.startsWith(`${chatId}::`))
+      .map(([, record]) => ({
+        chatId,
+        botId: record.botId,
+        botName: bot.config.botName,
+        sessionId: record.sessionId ?? '',
+        source: record.source,
+        at: record.at,
+      })))
+  }
+
   async bindToSession(chatId: string, sessionId: string, botId?: string): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId)
   }
@@ -1398,6 +1413,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   const host = new BotHost(ctx, base, bots)
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
+  registerBindingInfoTool(ctx, host)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: '/feishu-bot/api',
@@ -1505,6 +1521,26 @@ function registerBindTool(ctx: HostContext, bot: BotHost): void {
   }), 'feishu-bot: bind tool')
 }
 
+
+/** Read-only tool: let a bound session answer which bots own a group. */
+function registerBindingInfoTool(ctx: HostContext, host: BotHost): void {
+  ctx.effect(() => ctx.tools.register({
+    name: 'feishu_group_bindings',
+    description: 'List the Feishu bots currently bound to one group chat, including the session each bot routes into. Use this when asked how many bots are in the group or which bot owns it.',
+    parameters: {
+      chat_id: {
+        type: 'string',
+        required: true,
+        description: 'Feishu group chat id (oc_...), usually the 群ID in the prompt header.',
+      },
+    },
+    async execute(args: { chat_id?: unknown }) {
+      const chatId = typeof args.chat_id === 'string' ? args.chat_id.trim() : ''
+      if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) throw new Error('chat_id must be a Feishu group id (oc_...)')
+      return { chatId, bindings: host.bindingsForChat(chatId) }
+    },
+  }), 'habo-assistant: group bindings tool')
+}
 
 /** Read a small JSON request body. */
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {

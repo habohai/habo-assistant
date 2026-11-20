@@ -121,7 +121,7 @@ test('an accepted message gets an immediate placeholder that becomes the answer'
     // The answer replaced the placeholder instead of adding another message.
     assert.equal(replies.length, 1)
 
-    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 提问人:ou_1]\n帮我看下构建为什么失败')
+    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:1 | 提问人:ou_1]\n帮我看下构建为什么失败')
     assert.equal(bot.metrics.snapshot().counts.jobsSucceeded, 1)
   } finally {
     await bot.dispose()
