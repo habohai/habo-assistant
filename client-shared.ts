@@ -70,27 +70,60 @@ export async function fetchFeishuApi<T>(url: string, init?: RequestInit): Promis
   return payload.value as T
 }
 
-/** Poll the bot health endpoint for the task page's connection light. */
-export function useFeishuConnection(React: typeof ReactNS): ConnectionState {
-  const [connection, setConnection] = React.useState<ConnectionState>('connecting')
+export interface FeishuStatusState {
+  data?: FeishuStatus
+  loading: boolean
+  error: string
+  reload: () => void
+}
+
+/**
+ * One status fetch/reload state machine for both Sidebar pages.
+ * `pollMs` keeps a connection view live; session-info uses `refresh=1` on open.
+ */
+export function useFeishuStatus(
+  React: typeof ReactNS,
+  options: { refresh?: boolean; pollMs?: number } = {},
+): FeishuStatusState {
+  const refresh = options.refresh === true
+  const pollMs = options.pollMs
+  const [data, setData] = React.useState<FeishuStatus | undefined>(undefined)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState('')
+  const [nonce, setNonce] = React.useState(0)
   React.useEffect(() => {
-    let disposed = false
-    const poll = async (): Promise<void> => {
+    let alive = true
+    let timer: ReturnType<typeof setInterval> | undefined
+    const load = async (): Promise<void> => {
       try {
-        const value = await fetchFeishuApi<{ ready?: boolean; consumer?: boolean }>(`${FEISHU_API}?action=status`)
-        if (disposed) return
-        if (value.ready === true && value.consumer === true) setConnection('ready')
-        else if (value.consumer === true) setConnection('connecting')
-        else setConnection('offline')
-      } catch {
-        if (!disposed) setConnection('offline')
+        const value = await fetchFeishuApi<FeishuStatus>(`${FEISHU_API}?action=status${refresh ? '&refresh=1' : ''}`)
+        if (!alive) return
+        setData({ ...value, bindings: Array.isArray(value.bindings) ? value.bindings : [] })
+        setError('')
+      } catch (reason) {
+        if (!alive) return
+        setError(reason instanceof Error ? reason.message : String(reason))
+      } finally {
+        if (alive) setLoading(false)
       }
     }
-    void poll()
-    const timer = setInterval(() => { void poll() }, 3000)
-    return () => { disposed = true; clearInterval(timer) }
-  }, [React])
-  return connection
+    void load()
+    if (pollMs !== undefined && pollMs > 0) timer = setInterval(() => { void load() }, pollMs)
+    return () => {
+      alive = false
+      if (timer !== undefined) clearInterval(timer)
+    }
+  }, [React, refresh, pollMs, nonce])
+  return { data, loading, error, reload: () => setNonce(value => value + 1) }
+}
+
+/** Poll the bot health endpoint for the task page's connection light. */
+export function useFeishuConnection(React: typeof ReactNS): ConnectionState {
+  const { data } = useFeishuStatus(React, { pollMs: 3000 })
+  if (data === undefined) return 'connecting'
+  return data.ready === true && data.consumer === true
+    ? 'ready'
+    : data.consumer === true ? 'connecting' : 'offline'
 }
 
 export interface SessionTitleRow {

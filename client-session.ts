@@ -108,7 +108,7 @@ interface ClientLocale {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void
 }
 
-import { FEISHU_API, fetchFeishuApi, groupDisplayName, sessionDisplayTitle, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
+import { FEISHU_API, fetchFeishuApi, groupDisplayName, sessionDisplayTitle, useFeishuStatus, type FeishuBinding, type FeishuChat, type FeishuGroupDetail, type FeishuSessionBinding, type FeishuStatus } from './client-shared.js'
 
 interface ClientContext {
   locale: ClientLocale
@@ -904,34 +904,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       )
     }
 
-    /** Load Feishu bindings, with an explicit reload trigger. */
-    function useFeishu(): { data?: FeishuStatus; loading: boolean; error: string; reload: () => void } {
-      const [data, setData] = useState<FeishuStatus | undefined>(undefined)
-      const [loading, setLoading] = useState(true)
-      const [error, setError] = useState('')
-      const [nonce, setNonce] = useState(0)
-      useEffect(() => {
-        let alive = true
-        setLoading(true)
-        fetchFeishuApi<FeishuStatus>(`${FEISHU_API}?action=status&refresh=1`)
-          .then(value => {
-            if (!alive) return
-            setData({ ...value, bindings: Array.isArray(value.bindings) ? value.bindings : [] })
-            setError('')
-          })
-          .catch(reason => {
-            if (!alive) return
-            setData(undefined)
-            setError(reason instanceof Error ? reason.message : String(reason))
-          })
-          .finally(() => {
-            if (alive) setLoading(false)
-          })
-        return () => { alive = false }
-      }, [nonce])
-      return { data, loading, error, reload: () => setNonce(value => value + 1) }
-    }
-
     /** Group chip shown for a bound Feishu group. */
     function GroupGlyph() {
       return h('svg', {
@@ -1303,7 +1275,7 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
       const { getTriggerProps } = useContextMenu()
       const [closedSections, setClosedSections] = useState<Record<string, boolean>>({})
       const [closedDirs, setClosedDirs] = useState<Record<string, boolean>>({})
-      const feishu = useFeishu()
+      const feishu = useFeishuStatus(React, { refresh: true })
       const [bindOpen, setBindOpen] = useState(false)
       const [chats, setChats] = useState<FeishuChat[]>([])
       const [chatsLoading, setChatsLoading] = useState(false)
