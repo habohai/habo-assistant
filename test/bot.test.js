@@ -413,6 +413,7 @@ test('an outbound send claims the conversation and grants the sending bot', asyn
     await waitFor(() => bot.registry.get('oc_1')?.sessionId === 'ses_sender')
     assert.equal(bot.registry.get('oc_1')?.source, 'outbound')
     assert.equal(bot.registry.hasGrant('oc_1'), true)
+    await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
