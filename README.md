@@ -56,6 +56,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
     ownerUnionId: on_xxxxxxxxxxxxxxxx
     # chat：群主会话；topic：话题独立 session
     routing: topic
+    # 新话题继承群主会话摘要；none 则从空上下文开始
+    topicContext: summary
     permissionPreset: workspace-write
     approveUsers:
       - ou_xxxxxxxxxxxxxxxx
@@ -69,6 +71,8 @@ profile 配置示例（沿用原 `dsh-feishu-bot` 的配置）：
 从 session 用 `+messages-reply --reply-in-thread` 往话题发消息，也会按 `(chatId, threadId)` 认领话题；话题内的审批提示和审批结果也会回复在原话题里。
 
 `ownerUnionId` 用于发消息认领时校验 owner 是否在群内；群成员接口无权限时会降级为“bot 在群”的校验并记录 warning。
+
+新话题默认从群主会话注入最近几轮摘要（`topicContext: summary`）；设为 `none` 则从空上下文开始。`feishu_bind_chat` 和绑定 API 支持可选 `thread_id`（`omt_...`）手动绑定具体话题。
 
 群名缓存默认 5 分钟，可用 `chatListTtlMs` 调整。
 

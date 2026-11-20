@@ -231,19 +231,27 @@ export class LarkCli {
 
   /** Resolve the chat/topic context of one message (used for reply-to-topic claims). */
   async messageContext(messageId: string): Promise<{ chatId: string; threadId: string } | undefined> {
-    const { stdout } = await this.run([
-      'im', '+messages-mget',
-      '--message-ids', messageId,
-      '--as', 'bot',
-      '--json',
-    ])
-    const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
-    const message = parsed.data?.messages?.[0]
-    if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
-    return {
-      chatId: message.chat_id,
-      threadId: typeof message.thread_id === 'string' ? message.thread_id : '',
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+messages-mget',
+          '--message-ids', messageId,
+          '--as', identity,
+          '--json',
+        ])
+        const parsed = JSON.parse(stdout) as { data?: { messages?: Array<{ chat_id?: unknown; thread_id?: unknown }> } }
+        const message = parsed.data?.messages?.[0]
+        if (message === undefined || typeof message.chat_id !== 'string' || message.chat_id === '') return undefined
+        return {
+          chatId: message.chat_id,
+          threadId: typeof message.thread_id === 'string' ? message.thread_id : '',
+        }
+      } catch (error) {
+        lastError = error
+      }
     }
+    throw lastError instanceof Error ? lastError : new Error('cannot read message context')
   }
 
   /** Union ids of the users in a group (stable across bot apps). */

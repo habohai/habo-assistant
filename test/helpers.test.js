@@ -24,6 +24,8 @@ test('normalizeConfig applies safe defaults', () => {
   assert.deepEqual(config.allowChats, [])
   assert.equal(normalizeConfig({ routing: 'thread' }).routing, 'thread')
   assert.equal(normalizeConfig({ routing: 'topic' }).routing, 'topic')
+  assert.equal(normalizeConfig({}).topicContext, 'summary')
+  assert.equal(normalizeConfig({ topicContext: 'none' }).topicContext, 'none')
   assert.equal(normalizeConfig({ ownerUnionId: ' on_owner ' }).ownerUnionId, 'on_owner')
   assert.deepEqual(normalizeConfig({ allowChats: [' oc_1 ', '', 3] }).allowChats, ['oc_1'])
 })

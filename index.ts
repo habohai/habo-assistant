@@ -725,10 +725,11 @@ export class FeishuBot {
   }
 
   /** Bind a group to an existing Session from the Web UI. */
-  async bindToSession(chatId: string, sessionId: string): Promise<void> {
+  async bindToSession(chatId: string, sessionId: string, threadId = ''): Promise<void> {
     if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) throw new Error('chat_id must be a Feishu group id (oc_...)')
+    if (threadId !== '' && !/^omt_[A-Za-z0-9]+$/.test(threadId)) throw new Error('thread_id must be a Feishu topic id (omt_...)')
     if (this.ctx.sessions.get(sessionId) === undefined) throw new Error('session not found')
-    await this.bindChat(chatId, sessionId)
+    await this.bindChat(chatId, sessionId, 'manual', threadId)
     await this.allowChat(chatId)
   }
 
@@ -1013,9 +1014,9 @@ export class FeishuBot {
     await this.registry.bind(chatId, threadId, sessionId, source)
   }
 
-  async bindChat(chatId: string, sessionId: string, source: 'manual' | 'external' = 'manual'): Promise<void> {
+  async bindChat(chatId: string, sessionId: string, source: 'manual' | 'external' = 'manual', threadId = ''): Promise<void> {
     await this.assertBindableChat(chatId)
-    const key = bindingKey(chatId, '', this.routing)
+    const key = bindingKey(chatId, threadId, this.routing)
     const previous = this.registry.get(key)?.sessionId
     await this.setBinding(key, sessionId, source)
     await this.recordChatAffinity(chatId, sessionId, Date.now())
@@ -1213,7 +1214,14 @@ export class FeishuBot {
     if (event.chatType === 'group' && this.routing === 'topic' && typeof event.threadId === 'string' && event.threadId !== ''
       && (resolution.kind === 'none' || resolution.kind === 'candidate')) {
       // A topic is its own conversation lane, never the group's main Session.
-      return this.createSessionForChat(key, event, text)
+      let summary = ''
+      if (this.config.topicContext === 'summary') {
+        const mainSession = this.registry.get(event.chatId)?.sessionId
+        if (mainSession !== undefined) {
+          summary = (await this.sessionDigest(mainSession).catch(() => undefined))?.summary ?? ''
+        }
+      }
+      return this.createSessionForChat(key, event, text, summary)
     }
 
     if (known !== undefined && resolution.kind === 'explicit') {
@@ -1518,16 +1526,16 @@ export class BotHost {
       })
   }
 
-  async bindToSession(chatId: string, sessionId: string, botId?: string): Promise<void> {
-    await this.pick(botId).bindToSession(chatId, sessionId)
+  async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
+    await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
 
   async unbindChat(chatId: string, botId?: string): Promise<boolean> {
     return this.pick(botId).unbindChat(chatId)
   }
 
-  async bindChat(chatId: string, sessionId: string, botId?: string): Promise<void> {
-    await this.pick(botId).bindChat(chatId, sessionId)
+  async bindChat(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
+    await this.pick(botId).bindChat(chatId, sessionId, 'manual', threadId)
   }
 
   async assertBindableChat(chatId: string, botId?: string): Promise<void> {
@@ -1601,7 +1609,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
 function registerBindTool(ctx: HostContext, bot: BotHost): void {
   ctx.effect(() => ctx.tools.register({
     name: 'feishu_bind_chat',
-    description: 'Bind a Feishu group chat to a DSH Session so future @bot messages continue there. Call when the user asks to talk with people in a Feishu group from here. mode=handoff (default) creates a small new Session with the provided summary; new creates an empty Session; current reuses this Session; fork copies the full history (slow when this Session is large).',
+    description: 'Bind a Feishu group chat or one of its topics to a DSH Session so future @bot messages continue there. Call when the user asks to talk with people in a Feishu group from here. mode=handoff (default) creates a small new Session with the provided summary; new creates an empty Session; current reuses this Session; fork copies the full history (slow when this Session is large).',
     parameters: {
       chat_id: {
         type: 'string',
@@ -1624,6 +1632,11 @@ function registerBindTool(ctx: HostContext, bot: BotHost): void {
         required: false,
         description: 'Bot id/name/open_id when multiple Feishu bots are configured; defaults to the primary bot.',
       },
+      thread_id: {
+        type: 'string',
+        required: false,
+        description: 'Optional Feishu topic id (omt_...). Omit to bind the group main conversation.',
+      },
     },
     output: {
       schema: {
@@ -1631,26 +1644,29 @@ function registerBindTool(ctx: HostContext, bot: BotHost): void {
         additionalProperties: false,
         properties: {
           chatId: { type: 'string' },
+          threadId: { type: 'string' },
           sessionId: { type: 'string' },
           mode: { type: 'string' },
         },
-        required: ['chatId', 'sessionId', 'mode'],
+        required: ['chatId', 'threadId', 'sessionId', 'mode'],
       },
       render: (_args: unknown, value: { chatId: string; sessionId: string; mode: string }) => [{
         type: 'text',
         text: `Feishu group ${value.chatId} is now bound to ${value.sessionId} (${value.mode}).`,
       }],
     },
-    presentCall: (args: { chat_id?: string; mode?: string }) => ({
+    presentCall: (args: { chat_id?: string; thread_id?: string; mode?: string }) => ({
       card: 'generic',
       title: 'Bind Feishu group',
       kind: 'other',
       rawInput: args,
     }),
-    async execute(args: { chat_id?: unknown; mode?: unknown; handoff?: unknown; bot?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
+    async execute(args: { chat_id?: unknown; thread_id?: unknown; mode?: unknown; handoff?: unknown; bot?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
       const chatId = typeof args.chat_id === 'string' ? args.chat_id.trim() : ''
       if (!/^oc_[A-Za-z0-9]+$/.test(chatId)) throw new Error('chat_id must be a Feishu group id (oc_...)')
       const botId = typeof args.bot === 'string' ? args.bot.trim() : ''
+      const threadId = typeof args.thread_id === 'string' ? args.thread_id.trim() : ''
+      if (threadId !== '' && !/^omt_[A-Za-z0-9]+$/.test(threadId)) throw new Error('thread_id must be a Feishu topic id (omt_...)') 
       await bot.assertBindableChat(chatId, botId)
       const current = exec.agent?.session?.id
       if (typeof current !== 'string') throw new Error('feishu_bind_chat requires an owning Session')
@@ -1660,7 +1676,9 @@ function registerBindTool(ctx: HostContext, bot: BotHost): void {
       await bot.allowChat(chatId)
       let sessionId = current
       const groupTitle = await bot.chatName(chatId, botId)
-      const title = groupTitle === undefined || groupTitle === '' ? `飞书·${chatId.slice(-8)}` : `飞书·${groupTitle}`
+      const title = threadId !== ''
+        ? topicSessionTitle(groupTitle ?? '', handoff)
+        : groupTitle === undefined || groupTitle === '' ? `飞书·${chatId.slice(-8)}` : `飞书·${groupTitle}`
       if (mode === 'fork') {
         const forked = await bot.ctx.sessionController.fork({ sessionId: current })
         sessionId = forked.sessionId
@@ -1685,9 +1703,9 @@ function registerBindTool(ctx: HostContext, bot: BotHost): void {
           })
         }
       }
-      await bot.bindChat(chatId, sessionId, botId)
+      await bot.bindChat(chatId, sessionId, botId, threadId)
       if (mode === 'handoff') bot.seedHandoffSession(sessionId, title, botId)
-      return { chatId, sessionId, mode }
+      return { chatId, threadId, sessionId, mode }
     },
   }), 'feishu-bot: bind tool')
 }
@@ -1813,12 +1831,13 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : ''
   const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
   const botId = typeof body.botId === 'string' ? body.botId.trim() : ''
+  const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : ''
   if (action === 'bind') {
     if (chatId === '' || sessionId === '') {
       sendJson(res, 400, { ok: false, error: 'chatId and sessionId are required' })
       return
     }
-    await bot.bindToSession(chatId, sessionId, botId)
+    await bot.bindToSession(chatId, sessionId, botId, threadId)
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
     return
   }

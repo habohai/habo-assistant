@@ -35,6 +35,8 @@ export interface Config {
   bots: BotConfig[]
   agentPreset?: string
   routing: 'chat' | 'topic' | 'thread'
+  /** New topics inherit a compact digest of the group's main session. */
+  topicContext: 'summary' | 'none'
   replyInThread: boolean
   progress: boolean
   ackReaction: string
@@ -72,6 +74,7 @@ export const DEFAULTS = {
   approvalTimeoutMs: 2 * 60 * 1000,
   p2pSessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   chatListTtlMs: 5 * 60 * 1000,
+  topicContext: 'summary' as const,
 }
 
 /** `none`/`off` (any case) disables the acknowledgement reaction. */
@@ -111,6 +114,7 @@ export function normalizeConfig(raw: unknown): Config {
     botName: string('botName', '飞书机器人'),
     agentPreset: string('agentPreset') || undefined,
     routing: value.routing === 'topic' || value.routing === 'thread' ? value.routing : 'chat',
+    topicContext: value.topicContext === 'none' ? 'none' : 'summary',
     replyInThread: value.replyInThread !== false,
     /** Send a placeholder reply immediately and edit it into the final answer. */
     progress: value.progress !== false,

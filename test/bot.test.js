@@ -509,3 +509,17 @@ test('approval prompt and note reply inside the triggering topic', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('manual binding can target one topic without touching the group main conversation', async () => {
+  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  try {
+    bot.cli.listChats = async () => [{ chatId: 'oc_1', name: 'Test group', botMember: true }]
+    await bot.bindChat('oc_1', 'ses_topic', 'manual', 'omt_topic')
+    assert.equal(bot.registry.get('oc_1::omt_topic')?.sessionId, 'ses_topic')
+    assert.equal(bot.registry.get('oc_1'), undefined)
+    assert.deepEqual(bot.registry.botIdsFor('oc_1::omt_topic'), [bot.config.botId])
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
