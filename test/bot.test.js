@@ -488,7 +488,8 @@ test('outbound reply-in-thread claims the topic, not the group main session', as
 })
 
 test('approval prompt and note reply inside the triggering topic', async () => {
-  const { bot, stateDir } = await createBot({}, { routing: 'topic' })
+  // Text prompts keep the topic reply path; cards only apply when enabled.
+  const { bot, stateDir } = await createBot({}, { routing: 'topic', approvalCards: false })
   try {
     const calls = []
     bot.cli.reply = async (messageId, text, options) => {
@@ -686,6 +687,71 @@ test('delegation follows the configured pressure and turn thresholds', async () 
     assert.equal(await bot.shouldDelegate('ses_1'), true)
     bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 90 }, contextPressure: { surfaceTokens: 500 } } })
     assert.equal(await bot.shouldDelegate('ses_1'), true)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a follow-up task reuses the previous summary and can be cancelled', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+  try {
+    const prompts = []
+    const activations = []
+    bot.ctx.subagents = {
+      async startActivation(spec) {
+        prompts.push(spec.prompt.map(part => part.text).join('\n'))
+        let dispose = 0
+        const activation = {
+          childId: `ses_child_${activations.length}`,
+          result: Promise.resolve({ output: [{ type: 'text', text: `答案 ${activations.length}` }], stopReason: 'completed' }),
+          async dispose() { dispose += 1 },
+        }
+        activations.push(activation)
+        return activation
+      },
+    }
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+
+    const first = await bot.runInSubagent('oc_1', 'ses_1', '整理长报告')
+    assert.equal(first, '答案 0')
+    assert.equal(bot.taskFor('oc_1')?.status, 'succeeded')
+
+    const second = await bot.runInSubagent('oc_1', 'ses_1', '再补充一点')
+    assert.equal(second, '答案 1')
+    assert.ok(prompts[1].includes('答案 0'), 'follow-up should carry the previous summary')
+
+    assert.equal(await bot.cancelTask('oc_1'), false)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('cancelTask disposes a running activation', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+  try {
+    let disposed = 0
+    let release
+    const gate = new Promise(resolve => { release = resolve })
+    bot.ctx.subagents = {
+      async startActivation() {
+        return {
+          childId: 'ses_child',
+          result: gate.then(() => ({ output: [{ type: 'text', text: 'late' }], stopReason: 'completed' })),
+          async dispose() { disposed += 1 },
+        }
+      },
+    }
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    const pending = bot.runInSubagent('oc_9', 'ses_1', 'long job')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(await bot.cancelTask('oc_9'), true)
+    assert.equal(disposed, 1)
+    release()
+    await pending
+    await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })

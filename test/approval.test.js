@@ -206,8 +206,11 @@ test('an approval question is asked in the chat and resolved by a reply', async 
     await waitFor(() => spawned.some(request => request.argv.includes('+messages-send')))
     const sent = spawned.filter(request => request.argv.includes('+messages-send'))
     assert.equal(sent.length, 1)
-    assert.match(sent[0].argv[sent[0].argv.indexOf('--text') + 1], /需要审批/)
-    assert.match(sent[0].argv[sent[0].argv.indexOf('--text') + 1], /rm -rf build/)
+    // Approvals are interactive cards by default; the payload still names the command.
+    const payload = sent[0].argv[sent[0].argv.indexOf('--content') + 1]
+    assert.match(payload, /需要审批/)
+    assert.match(payload, /rm -rf build/)
+    assert.equal(sent[0].argv[sent[0].argv.indexOf('--msg-type') + 1], 'interactive')
 
     bot.onEventLine(approvalReply('同意'))
     assert.equal(await pending, 'allowed-once')
@@ -332,6 +335,59 @@ test('without an authorized group approver only the DSH answerer decides', async
     assert.equal(outcome, 'unavailable')
     assert.equal(called, true)
     assert.equal(bot.approvals.size, 0)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a card click settles the same approval entry', async () => {
+  const { bot, stateDir, listeners } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.installApprovalGate()
+    const answerer = listeners.get('approval/request')
+    const pending = answerer({
+      agent: { session: { id: 'ses_1' } },
+      toolName: 'bash',
+      reason: '命令审批：ls',
+      signal: new AbortController().signal,
+    }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.onCardActionLine(JSON.stringify({
+      chat_id: 'oc_1',
+      operator: { open_id: 'ou_owner' },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+    }))
+    assert.equal(await pending, 'allowed-once')
+    assert.equal(bot.metrics.snapshot().counts.approvalAllowed, 1)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a card click from a non-approver is ignored', async () => {
+  const { bot, stateDir, listeners } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.installApprovalGate()
+    const answerer = listeners.get('approval/request')
+    const pending = answerer({
+      agent: { session: { id: 'ses_1' } },
+      toolName: 'bash',
+      reason: '命令审批：ls',
+      signal: new AbortController().signal,
+    }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.onCardActionLine(JSON.stringify({
+      chat_id: 'oc_1',
+      operator: { open_id: 'ou_stranger' },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+    }))
+    assert.equal(bot.approvals.has('oc_1'), true)
+    bot.settleApproval('oc_1', 'cancelled')
+    assert.equal(await pending, 'cancelled')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })

@@ -501,6 +501,28 @@ export class LarkCli {
     return parseMessageId(stdout)
   }
 
+  /**
+   * Send an interactive card into a chat.
+   *
+   * Used for approvals, where buttons replace the "reply 同意/拒绝" round trip.
+   * A caller that cannot render a card keeps the text prompt as its fallback.
+   */
+  async sendCard(chatId: string, card: unknown, keySuffix = '0'): Promise<string | undefined> {
+    if (this.dryRun) {
+      this.logger?.info(`feishu-bot[dry-run]: send card to ${chatId}`)
+      return undefined
+    }
+    const { stdout } = await this.run([
+      'im', '+messages-send',
+      '--chat-id', chatId,
+      '--msg-type', 'interactive',
+      '--content', JSON.stringify(card),
+      '--as', 'bot',
+      '--idempotency-key', `feishu-card-${chatId.slice(0, 18)}-${keySuffix}`.slice(0, 50),
+    ])
+    return parseMessageId(stdout)
+  }
+
   /** React to a message (a sub-second acknowledgement that costs no message). */
   async react(messageId: string, emoji: string): Promise<boolean> {
     if (this.dryRun) {

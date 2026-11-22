@@ -28,9 +28,10 @@ import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ExecLike } from './src/approval.js'
 import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
-import type { HostContext, Job, SessionEventLike, SessionLike, SubagentsLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
+import type { HostContext, Job, SessionEventLike, SessionLike, SubagentActivationLike, SubagentsLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
 import { decideReply, docSummary } from './src/format/decide.js'
+import { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 import { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
@@ -46,6 +47,8 @@ import { KeyedQueue } from './src/work.js'
 
 /** Feishu event key consumed by the bot. */
 export const EVENT_KEY = 'im.message.receive_v1'
+/** Card button clicks consumed for approvals. */
+export const CARD_EVENT_KEY = 'card.action.trigger'
 /** Ready marker lark-cli writes to stderr once the subscription is live. */
 const READY_MARKER = '[event] ready'
 /** Shown while the agent works; replaced by the real answer when it lands. */
@@ -58,6 +61,7 @@ export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { decideReply, docSummary, hasMarkdownTable, markdownMarkers, DEFAULT_REPLY_POLICY } from './src/format/decide.js'
 export { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
+export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 export type { ReplyKind, ReplyPlan, ReplyPolicy, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
@@ -97,6 +101,14 @@ interface PendingTurn {
   timer?: NodeJS.Timeout
 }
 
+interface FeishuTaskState {
+  taskId: string
+  childId: string
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
+  summary: string
+  updatedAt: number
+}
+
 interface ApprovalRequest {
   agent?: { session?: { id?: string } }
   reason?: string
@@ -127,6 +139,7 @@ export class FeishuBot {
   readonly queue: KeyedQueue<Job>
   readonly pending: Map<string, PendingTurn>
   private consumer: SubprocessHandle | undefined
+  private cardConsumer: SubprocessHandle | undefined
   private readyTimer: NodeJS.Timeout | undefined
   private statsTimer: NodeJS.Timeout | undefined
   private restartTimer: NodeJS.Timeout | undefined
@@ -150,6 +163,10 @@ export class FeishuBot {
   private lastEventAt: number
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
+  /** conversationKey -> last delegated task, so a follow-up keeps its thread. */
+  private readonly tasks: Map<string, FeishuTaskState>
+  /** conversationKey -> live subagent activation, so stop can cancel it. */
+  private readonly activations: Map<string, SubagentActivationLike>
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
@@ -183,6 +200,7 @@ export class FeishuBot {
     })
     this.pending = new Map()
     this.consumer = undefined
+    this.cardConsumer = undefined
     this.readyTimer = undefined
     this.statsTimer = undefined
     this.restartTimer = undefined
@@ -200,6 +218,8 @@ export class FeishuBot {
     this.lastEventAt = 0
     this.sessionLookup = new Map()
     this.digestCache = new Map()
+    this.tasks = new Map()
+    this.activations = new Map()
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -233,6 +253,7 @@ export class FeishuBot {
     this.statsTimer = setInterval(() => this.logStats(), this.config.statsIntervalMs)
     this.statsTimer.unref?.()
     this.startConsumer()
+    if (this.config.approvalCards) this.startCardConsumer()
   }
 
   async dispose(): Promise<void> {
@@ -258,8 +279,84 @@ export class FeishuBot {
     this.queue.close()
     this.consumer?.terminate()
     this.consumer = undefined
+    this.cardConsumer?.terminate()
+    this.cardConsumer = undefined
     this.logStats()
     await this.seen.dispose()
+  }
+
+  /**
+   * Consume approval button clicks.
+   *
+   * A second long connection listens for `card.action.trigger`; it shares the
+   * approval state with the text path, so either input settles the same entry.
+   * Failure to start is not fatal: the text prompt still works.
+   */
+  async startCardConsumer(): Promise<void> {
+    if (this.stopping || this.cardConsumer !== undefined) return
+    let executable
+    try {
+      executable = await this.cli.resolve()
+    } catch (error) {
+      this.ctx.logger.warn(`feishu-bot: cannot resolve ${this.config.larkCli} for card actions: ${String(error)}`)
+      return
+    }
+    let handle
+    try {
+      handle = this.ctx.subprocess.spawn({
+        argv: [executable, ...(this.config.larkProfile === undefined ? [] : ['--profile', this.config.larkProfile]), 'event', 'consume', CARD_EVENT_KEY, '--as', 'bot'],
+        cwd: this.config.cwd,
+        stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+        graceMs: 5000,
+      })
+    } catch (error) {
+      this.ctx.logger.warn(`feishu-bot: cannot start card action consumer: ${String(error)}`)
+      return
+    }
+    if (this.stopping) {
+      handle.terminate()
+      return
+    }
+    this.cardConsumer = handle
+    createInterface({ input: handle.stdout }).on('line', line => {
+      this.onCardActionLine(line)
+    })
+    createInterface({ input: handle.stderr }).on('line', line => {
+      if (line.includes(READY_MARKER)) this.ctx.logger.info('feishu-bot: card action consumer ready')
+    })
+    handle.done.then(outcome => {
+      this.cardConsumer = undefined
+      if (this.stopping) return
+      this.ctx.logger.warn(`feishu-bot: card action consumer exited code=${outcome.exitCode}`)
+      setTimeout(() => { void this.startCardConsumer() }, 5000).unref?.()
+    }).catch(() => {
+      this.cardConsumer = undefined
+    })
+  }
+
+  /** Handle one `card.action.trigger` NDJSON line. */
+  onCardActionLine(line: string): void {
+    const trimmed = line.trim()
+    if (trimmed === '' || !trimmed.startsWith('{')) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      return
+    }
+    const action = readCardAction(parsed)
+    if (action === undefined) return
+    if (this.config.approveUsers.length > 0 && !this.config.approveUsers.includes(action.operatorId)) {
+      this.metrics.inc('approvalIgnored')
+      this.ctx.logger.warn(`feishu-bot: ${action.operatorId || 'unknown'} may not approve via card in ${action.chatId}`)
+      return
+    }
+    this.metrics.inc(action.decision === 'allow' ? 'approvalAllowed' : 'approvalRejected')
+    this.settleApproval(
+      action.chatId,
+      action.decision === 'allow' ? 'allowed-once' : 'rejected',
+      action.decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。',
+    )
   }
 
   async startConsumer(): Promise<void> {
@@ -564,11 +661,19 @@ export class FeishuBot {
         entry.onAbort = onAbort
         signal.addEventListener('abort', onAbort, { once: true })
       }
-      const ask = messageId === undefined
-        ? this.cli.send(chatId, prompt)
-        : this.cli.reply(messageId, prompt, { inThread: threadId !== '', keySuffix: 'approval' })
+      const ask = this.config.approvalCards
+        ? this.cli.sendCard(chatId, approvalCard(reason, chatId, seconds), 'approval')
+        : messageId === undefined
+          ? this.cli.send(chatId, prompt)
+          : this.cli.reply(messageId, prompt, { inThread: threadId !== '', keySuffix: 'approval' })
       void ask.catch(error => {
         this.ctx.logger.warn(`feishu-bot: cannot ask for approval in ${chatId}: ${String(error)}`)
+        // A card the CLI cannot render must not swallow the approval.
+        if (this.config.approvalCards) {
+          const fallback = this.cli.send(chatId, prompt)
+          void fallback.catch(() => { this.settleApproval(chatId, 'unavailable') })
+          return
+        }
         this.settleApproval(chatId, 'unavailable')
       })
     })
@@ -820,6 +925,7 @@ export class FeishuBot {
       approvals: this.approvals.size,
       bindings: this.registry.entries().length,
       dynamicChats: this.chats.size,
+      tasks: this.tasks.size,
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
       bot: {
@@ -985,6 +1091,10 @@ export class FeishuBot {
     const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     const sessionId = this.registry.get(key)?.sessionId
     let stopped = false
+    if (this.activations.has(key)) {
+      void this.cancelTask(key)
+      stopped = true
+    }
     if (this.approvals.has(event.chatId)) {
       this.settleApproval(event.chatId, 'cancelled')
       stopped = true
@@ -1047,7 +1157,7 @@ export class FeishuBot {
     let answer
     try {
       const delegated = await this.shouldDelegate(sessionId)
-      const delegatedAnswer = delegated ? await this.runInSubagent(sessionId, text) : undefined
+      const delegatedAnswer = delegated ? await this.runInSubagent(key, sessionId, text) : undefined
       answer = delegatedAnswer ?? await this.promptAndCollect(sessionId, text, event)
     } catch (error) {
       if (this.stopping) return
@@ -1144,44 +1254,93 @@ export class FeishuBot {
    * assistant text is the answer. The activation is always disposed, so a failed
    * child cannot leak resources.
    */
-  async runInSubagent(sessionId: string, text: string): Promise<string | undefined> {
+  async runInSubagent(conversationKey: string, sessionId: string, text: string): Promise<string | undefined> {
     const subagents = this.ctx.subagents
     if (subagents === undefined) return undefined
     const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
     const parent = (resolved as { agent?: unknown }).agent
     if (parent === undefined || parent === null) return undefined
+    const previous = this.taskFor(conversationKey)
+    const prompt = previous === undefined || previous.summary === ''
+      ? text
+      : `上一轮任务的结论摘要（供你继续这个任务参考）：\n${previous.summary}\n\n用户新的消息：\n${text}`
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), Math.max(this.config.timeoutMs, 60_000))
     timer.unref?.()
-    let activation
+    let activation: SubagentActivationLike | undefined
     try {
       activation = await subagents.startActivation({
         provider: 'subagent-spawn-in-process',
         parent,
-        prompt: [{ type: 'text', text }],
+        prompt: [{ type: 'text', text: prompt }],
         signal: controller.signal,
         delivery: 'caller',
         label: 'feishu-task',
       })
+      this.activations.set(conversationKey, activation)
       this.metrics.inc('taskDelegated')
       const result = await activation.result
       const answer = (result.output ?? [])
         .map(block => (typeof block?.text === 'string' ? block.text : ''))
         .join('\n')
         .trim()
+      const failed = result.stopReason !== undefined && result.stopReason !== 'completed'
       if (answer === '') {
         this.ctx.logger.warn(`feishu-bot: task subagent returned no text (${String(result.stopReason)})`)
+        this.recordTask(conversationKey, activation.childId, 'failed', previous?.summary ?? '')
         return undefined
       }
+      this.recordTask(conversationKey, activation.childId, failed ? 'failed' : 'succeeded', answer.slice(0, 4000))
       return answer
     } catch (error) {
       this.metrics.inc('taskDelegateFailed')
       this.ctx.logger.warn(`feishu-bot: task subagent failed: ${String(error)}`)
+      this.recordTask(conversationKey, activation?.childId ?? '', 'failed', previous?.summary ?? '')
       return undefined
     } finally {
       clearTimeout(timer)
+      this.activations.delete(conversationKey)
       if (activation !== undefined) await activation.dispose().catch(() => {})
     }
+  }
+
+  /** Last task of one conversation, dropped once its idle TTL has elapsed. */
+  taskFor(conversationKey: string): FeishuTaskState | undefined {
+    const task = this.tasks.get(conversationKey)
+    if (task === undefined) return undefined
+    if (Date.now() - task.updatedAt > this.config.taskSubagentTtlMs) {
+      this.tasks.delete(conversationKey)
+      return undefined
+    }
+    return task
+  }
+
+  private recordTask(conversationKey: string, childId: string, status: FeishuTaskState['status'], summary: string): void {
+    this.tasks.set(conversationKey, {
+      taskId: `${conversationKey}:${Date.now()}`,
+      childId,
+      status,
+      summary,
+      updatedAt: Date.now(),
+    })
+  }
+
+  /** Cancel the delegated task of one conversation, if any. */
+  async cancelTask(conversationKey: string): Promise<boolean> {
+    const activation = this.activations.get(conversationKey)
+    if (activation === undefined) return false
+    const task = this.tasks.get(conversationKey)
+    this.tasks.set(conversationKey, {
+      taskId: task?.taskId ?? `${conversationKey}:${Date.now()}`,
+      childId: activation.childId,
+      status: 'cancelled',
+      summary: task?.summary ?? '',
+      updatedAt: Date.now(),
+    })
+    this.activations.delete(conversationKey)
+    await activation.dispose().catch(() => {})
+    this.metrics.inc('taskCancelled')
+    return true
   }
 
   /**

@@ -39,6 +39,7 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 | 长文与表格 | 超过阈值或含表格时转飞书文档，群里只发摘要和链接 |
 | 确认反馈 | `ackReaction: auto` 在 OnIt / Eyes / Typing 之间按消息稳定轮换 |
 | 长任务委派 | 上下文过长时把任务交给 task subagent，主 Session 不再继续膨胀 |
+| 审批卡片 | 审批用互动卡片，点「同意 / 拒绝」即可；文字回复仍然可用 |
 | 命令审批 | 群里回复「同意 / 拒绝」即可处理审批，审批提示和结果留在原话题 |
 | 会话信息 | 当前 Session 绑定的群/话题、bot 列表、行内解绑、会话产物 |
 | 实时刷新 | 绑定或连接变化通过 SSE 推送，页面不需要手动刷新，也不轮询 |
@@ -202,6 +203,8 @@ bots:
 | `taskSubagentEnabled` | `false` | 是否把长任务委派给 subagent |
 | `taskSubagentContextThreshold` | 120000 | 上下文 token 超过该值才委派 |
 | `taskSubagentTurnThreshold` | 80 | 轮次超过该值才委派 |
+| `taskSubagentTtlMs` | 30 分钟 | 任务摘要可复用的时长 |
+| `approvalCards` | `true` | 审批是否使用互动卡片 |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
 
 ## 回复格式
@@ -230,6 +233,22 @@ bots:
 - 结果回到原群 / 话题，主 Session 不再被长任务撑大；
 - 委派失败时自动回落到主 Session 执行；
 - 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭。
+
+## 审批
+
+- 默认发送互动卡片：`同意` / `拒绝` 两个按钮，点击即结算审批；
+- 卡片按钮回调通过第二条 `lark-cli event consume card.action.trigger` 长连接接收；
+- 只有 `approveUsers` 中的用户点击才生效，其他人点击被忽略并记日志；
+- 文字回复「@我 同意」仍然可用，两条路径共享同一份审批状态；
+- 卡片发送失败会自动回落为文字审批提示；
+- 设 `approvalCards: false` 可完全回到文字审批。
+
+## 任务委派生命周期
+
+- 每轮委派都记录 `taskId / childId / status / summary`；
+- 同一会话在 `taskSubagentTtlMs` 内的下一次委派会带上上一轮摘要，保证追问不断线；
+- `停止` 会取消正在运行的子任务，并标记为 `cancelled`，不影响群/话题绑定；
+- 委派失败或子代理无输出时自动回落主 Session 执行。
 
 ## 安全模型
 

@@ -50,6 +50,10 @@ export interface Config {
   taskSubagentContextThreshold: number
   /** Turn count above which a task is delegated. */
   taskSubagentTurnThreshold: number
+  /** How long one conversation's task summary stays reusable. */
+  taskSubagentTtlMs: number
+  /** Send approvals as interactive cards with buttons. */
+  approvalCards: boolean
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -136,6 +140,8 @@ export function normalizeConfig(raw: unknown): Config {
     taskSubagentEnabled: value.taskSubagentEnabled === true,
     taskSubagentContextThreshold: integer('taskSubagentContextThreshold', 120_000, 10_000, 2_000_000),
     taskSubagentTurnThreshold: integer('taskSubagentTurnThreshold', 80, 5, 10_000),
+    taskSubagentTtlMs: integer('taskSubagentTtlMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
+    approvalCards: value.approvalCards !== false,
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
     replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),
