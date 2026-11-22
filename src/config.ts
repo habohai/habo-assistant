@@ -50,7 +50,13 @@ export interface Config {
   taskSubagentTtlMs: number
   /** Registered subagent backend name on `ctx.subagents` (spawn provider default). */
   taskSubagentProvider: string
-  /** Send approvals as interactive cards with buttons. */
+  /**
+   * Send approvals as interactive cards with buttons.
+   *
+   * Off by default: card buttons need the app's card callback configured in the
+   * Feishu console, which is an organization-level change. Text approval works
+   * with only the message events the bot already consumes.
+   */
   approvalCards: boolean
   /** Where a bot-session approval is asked: the chat group (default) or DSH. */
   approvalChannel: 'feishu' | 'dsh'
@@ -141,7 +147,7 @@ export function normalizeConfig(raw: unknown): Config {
     // The provider registers under `providerName`, which defaults to `spawn`;
     // the package name `subagent-spawn-in-process` is NOT a registered backend.
     taskSubagentProvider: string('taskSubagentProvider', 'spawn'),
-    approvalCards: value.approvalCards !== false,
+    approvalCards: value.approvalCards === true,
     approvalChannel: value.approvalChannel === 'dsh' ? 'dsh' : 'feishu',
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),

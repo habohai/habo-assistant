@@ -697,7 +697,7 @@ export class FeishuBot {
     // Feishu de-duplicates a send by its idempotency key for about an hour, so
     // the key must identify this approval, not just the chat.
     const approvalId = `ap_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const prompt = `⚠️ 需要审批\n${reason}\n\n回复「@我 同意」执行，「@我 拒绝」取消（仅限指定审批人，${seconds} 秒内有效）`
+    const prompt = `⚠️ 需要审批\n\n${reason}\n\n@我 并回复「同意」执行，回复「拒绝」取消。\n仅限指定审批人，${seconds} 秒内有效。`
     this.metrics.inc('approvalAsked')
     const context = this.sessionContexts.get(sessionId)
     const messageId = context?.messageId

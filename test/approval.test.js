@@ -206,11 +206,11 @@ test('an approval question is asked in the chat and resolved by a reply', async 
     await waitFor(() => spawned.some(request => request.argv.includes('+messages-send')))
     const sent = spawned.filter(request => request.argv.includes('+messages-send'))
     assert.equal(sent.length, 1)
-    // Approvals are interactive cards by default; the payload still names the command.
-    const payload = sent[0].argv[sent[0].argv.indexOf('--content') + 1]
+    // Text approval needs no app-level card callback, so it is the default.
+    const payload = sent[0].argv[sent[0].argv.indexOf('--text') + 1]
     assert.match(payload, /需要审批/)
     assert.match(payload, /rm -rf build/)
-    assert.equal(sent[0].argv[sent[0].argv.indexOf('--msg-type') + 1], 'interactive')
+    assert.equal(sent[0].argv.includes('--msg-type'), false)
 
     bot.onEventLine(approvalReply('同意'))
     assert.equal(await pending, 'allowed-once')
@@ -481,10 +481,10 @@ test('a bot-session approval goes to the chat group by default', async () => {
     )
     await waitFor(() => bot.approvals.has('oc_1'))
     await waitFor(() => spawned.some(request => request.argv.includes('+messages-send')))
-    // The card is what the group sees; the DSH answerer is not consulted.
+    // The group is asked with a plain message; the DSH answerer is not consulted.
     const sent = spawned.filter(request => request.argv.includes('+messages-send'))
     assert.equal(sent.length, 1)
-    assert.equal(sent[0].argv[sent[0].argv.indexOf('--msg-type') + 1], 'interactive')
+    assert.ok(sent[0].argv.includes('--text'))
     assert.equal(bot.metrics.snapshot().counts.approvalFeishu, 1)
     assert.equal(bot.metrics.snapshot().counts.approvalDsh, undefined)
     bot.settleApproval('oc_1', 'cancelled')
