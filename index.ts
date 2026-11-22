@@ -290,6 +290,7 @@ export class FeishuBot {
     this.statsTimer.unref?.()
     this.startConsumer()
     if (this.config.approvalCards) this.startCardConsumer()
+    void this.probeCapabilities()
   }
 
   async dispose(): Promise<void> {
@@ -595,6 +596,25 @@ export class FeishuBot {
       const oldest = [...this.recentSenders.entries()].sort((a, b) => a[1].at - b[1].at)[0]
       if (oldest !== undefined) this.recentSenders.delete(oldest[0])
     }
+  }
+
+  /**
+   * Report a missing member scope at startup, before it breaks approval.
+   *
+   * Approval needs the approver's id, which is app-scoped; if the app cannot read
+   * members, the only symptom would otherwise be "the bot ignored me".
+   */
+  async probeCapabilities(): Promise<void> {
+    const chatId = this.registry.entries()[0]?.[1]?.chatId
+    if (chatId === undefined) return
+    const ok = await this.cli.probeMemberScope(chatId)
+    if (ok) return
+    const scopes = this.cli.scopeReport().map(entry => entry.scope)
+    this.ctx.logger.warn(
+      `feishu-bot: bot "${this.config.botName}" cannot read group members`
+      + `${scopes.length === 0 ? '' : ` (missing: ${scopes.join(', ')})`}`
+      + '; approval may not recognise you in this app',
+    )
   }
 
   /** Recent senders per chat, for filling `approveUsers` with the right ids. */

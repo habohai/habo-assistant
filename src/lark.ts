@@ -393,6 +393,27 @@ export class LarkCli {
     throw lastError instanceof Error ? lastError : new Error('cannot read message context')
   }
 
+  /**
+   * Check whether this app may read group members.
+   *
+   * Runs one cheap bot call so a missing scope is reported at startup instead of
+   * surfacing later as "the bot ignored my approval".
+   */
+  async probeMemberScope(chatId: string): Promise<boolean> {
+    try {
+      await this.run([
+        'im', '+chat-members-list',
+        '--chat-id', chatId,
+        '--as', 'bot',
+        '--page-size', '1',
+        '--json',
+      ])
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** Union ids of the users in a group (stable across bot apps). */
   async chatMemberUnionIds(chatId: string): Promise<Set<string>> {
     let lastError: unknown
