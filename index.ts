@@ -1057,13 +1057,17 @@ export class FeishuBot {
    * `decision.kind`; always hand an explicit decision to the next listener.
    */
   async preExecute(exec: unknown, next: () => Promise<any>): Promise<any> {
+    // Ask the rest of the chain first: DSH and other plugins keep their veto.
+    // Returning `ask` before `next()` would silently skip their decisions, so
+    // our gate may only ever *add* strictness, never replace it.
+    const base = await next()
     const decision = await this.outboundGate(exec)
     if (decision?.kind === 'deny') return decision
-    const action = await this.actionGate(exec)
+    if (base !== undefined && base !== null && base.kind !== 'allow') return base
     // `ask` makes DSH route the call through `approval/request`, which is the
-    // Feishu prompt; anything else continues the waterfall.
-    if (action !== undefined) return action
-    return next()
+    // Feishu prompt.
+    const action = await this.actionGate(exec)
+    return action ?? base
   }
 
   /**

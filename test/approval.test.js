@@ -740,3 +740,26 @@ test('action mode ignores sessions the bot does not own', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('the action gate never overrides another listener decision', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    const exec = { name: 'bash', arguments: { command: 'pnpm test' }, agent: { session: { id: 'ses_1' } } }
+
+    // A deny downstream stays a deny.
+    assert.deepEqual(await bot.preExecute(exec, async () => ({ kind: 'deny', reason: 'blocked' })), { kind: 'deny', reason: 'blocked' })
+    // An ask downstream stays an ask: our gate does not turn it into allow.
+    assert.deepEqual(await bot.preExecute(exec, async () => ({ kind: 'ask', reason: 'sandbox' })), { kind: 'ask', reason: 'sandbox' })
+    // An allow downstream may be upgraded to ask by action mode.
+    const upgraded = await bot.preExecute(exec, async () => ({ kind: 'allow' }))
+    assert.equal(upgraded.kind, 'ask')
+    // Read-only calls keep the downstream allow.
+    const read = { name: 'read', arguments: { path: '/tmp/a' }, agent: { session: { id: 'ses_1' } } }
+    assert.deepEqual(await bot.preExecute(read, async () => ({ kind: 'allow' })), { kind: 'allow' })
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
