@@ -19,6 +19,8 @@ export interface CardAction {
   decision: 'allow' | 'reject'
   /** open_id of the person who clicked, when the event provides it. */
   operatorId: string
+  /** Short-lived token that may update the clicked card in place. */
+  token?: string
 }
 
 /** Build the approval card for one command. */
@@ -95,5 +97,6 @@ export function readCardAction(raw: unknown): CardAction | undefined {
   if (chatId === '') return undefined
   const operator = event.operator as { open_id?: unknown } | undefined
   const operatorId = typeof operator?.open_id === 'string' ? operator.open_id : ''
-  return { chatId, decision, operatorId }
+  const token = typeof event.token === 'string' && event.token !== '' ? event.token : undefined
+  return { chatId, decision, operatorId, ...(token === undefined ? {} : { token }) }
 }

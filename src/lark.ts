@@ -523,6 +523,25 @@ export class LarkCli {
     return parseMessageId(stdout)
   }
 
+  /**
+   * Replace a clicked card in place.
+   *
+   * The callback token is short-lived and permits a bounded number of updates;
+   * failure is logged by the caller and never affects the approval outcome.
+   */
+  async updateCard(token: string, card: unknown): Promise<boolean> {
+    if (this.dryRun) {
+      this.logger?.info('feishu-bot[dry-run]: update card')
+      return true
+    }
+    await this.run([
+      'api', 'POST', '/open-apis/interactive/v1/card/update',
+      '--as', 'bot',
+      '--data', JSON.stringify({ token, card: { type: 'raw', data: card } }),
+    ])
+    return true
+  }
+
   /** React to a message (a sub-second acknowledgement that costs no message). */
   async react(messageId: string, emoji: string): Promise<boolean> {
     if (this.dryRun) {

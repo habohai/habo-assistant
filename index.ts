@@ -352,11 +352,14 @@ export class FeishuBot {
       return
     }
     this.metrics.inc(action.decision === 'allow' ? 'approvalAllowed' : 'approvalRejected')
-    this.settleApproval(
-      action.chatId,
-      action.decision === 'allow' ? 'allowed-once' : 'rejected',
-      action.decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。',
-    )
+    const outcome = action.decision === 'allow' ? 'allowed-once' : 'rejected'
+    const note = action.decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。'
+    this.settleApproval(action.chatId, outcome, note)
+    if (action.token !== undefined) {
+      void this.cli.updateCard(action.token, approvalResultCard(outcome, note)).catch(error => {
+        this.ctx.logger.debug(`feishu-bot: cannot update approval card: ${String(error)}`)
+      })
+    }
   }
 
   async startConsumer(): Promise<void> {

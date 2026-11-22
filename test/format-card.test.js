@@ -38,3 +38,18 @@ test('readCardAction reads the envelope and ignores unrelated cards', () => {
   assert.equal(readCardAction({ action: { value: { kind: 'feishu-approval', decision: 'maybe' } } }), undefined)
   assert.equal(readCardAction(null), undefined)
 })
+
+test('readCardAction keeps the update token when present', () => {
+  const action = readCardAction({
+    token: 'tok-1',
+    chat_id: 'oc_1',
+    operator: { open_id: 'ou_owner' },
+    action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+  })
+  assert.equal(action.token, 'tok-1')
+  const without = readCardAction({
+    chat_id: 'oc_1',
+    action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+  })
+  assert.equal('token' in without, false)
+})

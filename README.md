@@ -240,6 +240,7 @@ bots:
 - 卡片按钮回调通过第二条 `lark-cli event consume card.action.trigger` 长连接接收；
 - 只有 `approveUsers` 中的用户点击才生效，其他人点击被忽略并记日志；
 - 文字回复「@我 同意」仍然可用，两条路径共享同一份审批状态；
+- 点击后原卡片会更新为结果状态，按钮消失；
 - 卡片发送失败会自动回落为文字审批提示；
 - 设 `approvalCards: false` 可完全回到文字审批。
 
