@@ -32,7 +32,7 @@ import type { HostContext, Job, SessionEventLike, SessionLike, SubagentActivatio
 import { parseApprovalReply } from './src/approval.js'
 import { decideReply, docSummary } from './src/format/decide.js'
 import { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
-import { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
+import { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
 import { SeenStore } from './src/dedup.js'
@@ -60,7 +60,7 @@ export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangero
 export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { decideReply, docSummary, hasMarkdownTable, markdownMarkers, DEFAULT_REPLY_POLICY } from './src/format/decide.js'
-export { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
+export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 export type { ReplyKind, ReplyPlan, ReplyPolicy, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
@@ -541,13 +541,26 @@ export class FeishuBot {
         this.metrics.observe('ackMs', Date.now() - startedAt)
       })
       .catch(error => {
+        const message = error instanceof Error ? error.message : String(error)
+        // A rejected emoji type is a configuration mistake, not a broken scope:
+        // retry once with the fallback so a typo cannot silence acknowledgements.
+        if (emoji !== ACK_FALLBACK && /reaction type is invalid|231001/.test(message)) {
+          this.ctx.logger.warn(`feishu-bot: reaction "${emoji}" rejected; falling back to ${ACK_FALLBACK}`)
+          this.cli.react(event.messageId, ACK_FALLBACK).then(() => {
+            this.reactionFailures = 0
+          }).catch(() => {
+            this.reactionFailures += 1
+            this.metrics.inc('ackFailed')
+          })
+          return
+        }
         this.reactionFailures += 1
         this.metrics.inc('ackFailed')
         if (this.reactionFailures >= 3 && !this.reactionOff) {
           this.reactionOff = true
-          this.ctx.logger.warn(`feishu-bot: reaction acknowledgement disabled after repeated failures: ${String(error)}`)
+          this.ctx.logger.warn(`feishu-bot: reaction acknowledgement disabled after repeated failures: ${message}`)
         } else {
-          this.ctx.logger.debug(`feishu-bot: reaction failed: ${String(error)}`)
+          this.ctx.logger.debug(`feishu-bot: reaction failed: ${message}`)
         }
       })
   }

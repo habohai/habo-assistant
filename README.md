@@ -196,7 +196,7 @@ bots:
 | `replyGuidelines` | 中文简洁 | 回复风格 |
 | `p2pSessionTtlMs` | 30 天 | 私聊 Session 有效期 |
 | `chatListTtlMs` | 5 分钟 | 群名 / 群列表缓存 |
-| `ackReaction` | `auto` | `auto` 按消息稳定轮换确认表情；`none` 关闭；也可写死 emoji |
+| `ackReaction` | `auto` | `auto` 在 `OnIt` / `GLANCE` / `Typing` 间轮换；`none` 关闭；也可写死 emoji |
 | `docsEnabled` | `false` | 是否允许表格 / 长文自动转文档（默认关闭） |
 | `docThresholdChars` | 4000 | 超过该字数转文档 |
 | `docThresholdLines` | 60 | 超过该行数转文档 |
@@ -236,6 +236,13 @@ bots:
 - 结果回到原群 / 话题，主 Session 不再被长任务撑大；
 - 委派失败时自动回落到主 Session 执行；
 - 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭。
+
+## 确认表情
+
+- 收到消息后立刻在提问上加一个 reaction，不占用消息；
+- `auto` 在 `OnIt` / `GLANCE` / `Typing` 之间按消息稳定轮换，同一条消息重投不换；
+- 只使用飞书认可的 `emoji_type`；配置了未知类型会自动回退 `OnIt`；
+- 连续失败 3 次才关闭 reaction，避免一条错配置让反馈彻底消失。
 
 ## 审批
 

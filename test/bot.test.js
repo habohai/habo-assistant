@@ -757,3 +757,25 @@ test('cancelTask disposes a running activation', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('an accepted acknowledgement reacts on the question', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    // Without message editing there is no placeholder, so the reaction is the
+    // only immediate feedback; production lark-cli 1.0.80 takes this path.
+    bot.canEdit = false
+    const event = {
+      chatId: 'oc_1', chatType: 'group', messageId: 'om_ack', threadKey: '',
+      senderType: 'user', senderId: 'ou_1', messageType: 'text',
+      mentions: [{ id: 'ou_bot' }], content: '帮我看看',
+    }
+    bot.acknowledge(event)
+    await waitFor(() => spawned.some(request => request.argv.includes('reactions')))
+    const reaction = spawned.find(request => request.argv.includes('reactions'))
+    const emoji = JSON.parse(reaction.argv[reaction.argv.indexOf('--data') + 1]).reaction_type.emoji_type
+    assert.ok(['OnIt', 'GLANCE', 'Typing'].includes(emoji), `unexpected emoji ${emoji}`)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

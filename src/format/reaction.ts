@@ -8,8 +8,17 @@
  * the emoji) while varying across messages.
  */
 
-/** Emojis that all read as "received / in progress". */
-export const ACK_POOL = ['OnIt', 'Eyes', 'Typing'] as const
+/**
+ * Emojis that all read as "received / in progress".
+ *
+ * Only types Feishu actually accepts belong here: an unknown type is rejected
+ * with `231001 reaction type is invalid`, and repeated failures would otherwise
+ * trip the acknowledgement circuit breaker and silence every later message.
+ */
+export const ACK_POOL = ['OnIt', 'GLANCE', 'Typing'] as const
+
+/** Used when a configured emoji is rejected by the API. */
+export const ACK_FALLBACK = 'OnIt'
 
 /** Explicit modes that bypass the pool. */
 const DISABLED = ''

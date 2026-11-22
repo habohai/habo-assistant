@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ACK_POOL, pickAckReaction } from '../lib/index.js'
+import { ACK_FALLBACK, ACK_POOL, pickAckReaction } from '../lib/index.js'
 
 test('pickAckReaction keeps an explicit emoji verbatim', () => {
   assert.equal(pickAckReaction('OnIt', 'om_1'), 'OnIt')
@@ -25,4 +25,12 @@ test('pickAckReaction is stable for the same message', () => {
 
 test('pickAckReaction falls back to the first pool entry without an id', () => {
   assert.equal(pickAckReaction('auto', ''), ACK_POOL[0])
+})
+
+test('the acknowledgement pool only holds emoji types Feishu accepts', () => {
+  // `Eyes` is not a valid emoji_type; it fails with 231001 and used to trip the
+  // failure breaker, which silenced acknowledgement entirely.
+  assert.deepEqual([...ACK_POOL], ['OnIt', 'GLANCE', 'Typing'])
+  assert.equal(ACK_POOL.includes('Eyes'), false)
+  assert.equal(ACK_FALLBACK, 'OnIt')
 })
