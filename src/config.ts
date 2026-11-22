@@ -40,6 +40,16 @@ export interface Config {
   replyInThread: boolean
   progress: boolean
   ackReaction: string
+  /** Route tables and long replies into a Feishu document. */
+  docsEnabled: boolean
+  docThresholdChars: number
+  docThresholdLines: number
+  /** Delegate long tasks to a task subagent instead of growing the main Session. */
+  taskSubagentEnabled: boolean
+  /** Context pressure (surface tokens) above which a task is delegated. */
+  taskSubagentContextThreshold: number
+  /** Turn count above which a task is delegated. */
+  taskSubagentTurnThreshold: number
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -119,7 +129,13 @@ export function normalizeConfig(raw: unknown): Config {
     /** Send a placeholder reply immediately and edit it into the final answer. */
     progress: value.progress !== false,
     /** Emoji reacted onto the question while it is queued; '' disables. */
-    ackReaction: normalizeAckReaction(string('ackReaction', 'OnIt')),
+    ackReaction: normalizeAckReaction(string('ackReaction', 'auto')),
+    docsEnabled: value.docsEnabled !== false,
+    docThresholdChars: integer('docThresholdChars', 4000, 200, 200_000),
+    docThresholdLines: integer('docThresholdLines', 60, 5, 5000),
+    taskSubagentEnabled: value.taskSubagentEnabled === true,
+    taskSubagentContextThreshold: integer('taskSubagentContextThreshold', 120_000, 10_000, 2_000_000),
+    taskSubagentTurnThreshold: integer('taskSubagentTurnThreshold', 80, 5, 10_000),
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
     replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),

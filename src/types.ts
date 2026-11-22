@@ -65,6 +65,25 @@ export interface WorkspaceLike {
   attachSession(sessionId: string): Promise<void>
 }
 
+/** Minimal slice of the DSH subagent seam used for long-task delegation. */
+export interface SubagentActivationLike {
+  readonly childId: string
+  readonly result: Promise<{ output: Array<{ type?: string; text?: string }>; stopReason?: string; diagnostic?: string }>
+  dispose(): Promise<void>
+}
+
+export interface SubagentsLike {
+  startActivation(spec: {
+    provider: string
+    parent: unknown
+    prompt: Array<{ type: 'text'; text: string }>
+    signal: AbortSignal
+    delivery: 'parent' | 'caller'
+    label?: string
+    name?: string
+  }): Promise<SubagentActivationLike>
+}
+
 export interface HostContext {
   logger: Logger
   get(name: string): unknown
@@ -76,6 +95,7 @@ export interface HostContext {
   effect(callback: () => (() => void) | void, label?: string): unknown
   subprocess: SubprocessLike
   sessionController: SessionControllerLike
+  subagents?: SubagentsLike
   sessionProjections: { register(definition: unknown): Promise<unknown> }
   tools: { register(definition: Record<string, unknown>): () => void }
   sessions: { get(sessionId: string): unknown }

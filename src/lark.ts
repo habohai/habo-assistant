@@ -12,6 +12,7 @@
  * retried send is collapsed by Feishu instead of duplicating the answer.
  */
 
+import { decideReply } from './format/decide.js'
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 256 * 1024
@@ -101,6 +102,8 @@ export class LarkCli {
   private chatList: ChatSummary[] | undefined
   private chatListAt: number
   private readonly peerNames: Map<string, string>
+  /** Identities that may not create documents in this tenant; probed once. */
+  private readonly docDenied: Set<'bot' | 'user'>
 
   constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, chatListTtlMs = DEFAULT_CHAT_LIST_TTL_MS, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
@@ -118,6 +121,7 @@ export class LarkCli {
     this.chatList = undefined
     this.chatListAt = 0
     this.peerNames = new Map()
+    this.docDenied = new Set()
   }
 
   /** Resolve the executable once; a failure clears the cache for the next try. */
@@ -371,24 +375,35 @@ export class LarkCli {
     throw lastError instanceof Error ? lastError : new Error('cannot list group members')
   }
 
-  async reply(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
+  private static isMarkdown(text: string): boolean {
+    return /\*\*[^*]+\*\*|`[^`]+`|^#{1,6}\s|^\s*[-*+]\s+|^\s*\d+\.\s+|\[[^\]]+\]\([^\)]+\)|```/m.test(text)
+  }
+
+  /** Send a reply using Feishu post when the content contains supported Markdown. */
+  async replyFormatted(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
+    const markdown = LarkCli.isMarkdown(text)
     if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: reply to ${messageId}: ${text}`)
+      this.logger?.info(`feishu-bot[dry-run]: reply ${markdown ? 'markdown' : 'text'} to ${messageId}: ${text}`)
       return undefined
     }
-    const { stdout } = await this.run([
+    const args = [
       'im', '+messages-reply',
       '--message-id', messageId,
-      '--text', text,
+      ...(markdown ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
       '--idempotency-key', `feishu-${messageId.slice(0, 28)}-${keySuffix}`,
       ...(inThread === true ? ['--reply-in-thread'] : []),
-    ])
+    ]
+    const { stdout } = await this.run(args)
     return parseMessageId(stdout)
   }
 
+  async reply(messageId: string, text: string, options: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
+    return this.replyFormatted(messageId, text, options)
+  }
+
   /** Replace the text of a message the bot sent. */
-  async edit(messageId: string, text: string): Promise<boolean> {
+  async edit(messageId: string, text: string): Promise<boolean> { 
     if (this.dryRun) {
       this.logger?.info(`feishu-bot[dry-run]: edit ${messageId}: ${text}`)
       return true
@@ -420,17 +435,63 @@ export class LarkCli {
     return this.editSupport ?? false
   }
 
-  /** Send a fresh message into a chat (used for questions that have no parent). */
-  async send(chatId: string, text: string): Promise<string | undefined> {
+  /**
+   * Create a Feishu document from Markdown.
+   *
+   * Bot identity is preferred so the document belongs to the bot; many tenants
+   * only grant `docx:document:create` to the user token, so the user identity is
+   * a fallback. Returns undefined when neither identity may create documents.
+   */
+  async createDoc(title: string, markdown: string): Promise<{ url: string; documentId: string } | undefined> {
     if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: send to ${chatId}: ${text}`)
+      this.logger?.info(`feishu-bot[dry-run]: create doc ${title}`)
+      return undefined
+    }
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      if (this.docDenied.has(identity)) continue
+      try {
+        const { stdout } = await this.run([
+          'docs', '+create',
+          '--as', identity,
+          '--title', title,
+          '--doc-format', 'markdown',
+          '--content', markdown,
+          '--json',
+        ], { timeoutMs: Math.max(this.timeoutMs, 30_000) })
+        const parsed = parseCliJson(stdout) as { data?: { document?: { document_id?: unknown; url?: unknown } } }
+        const document = parsed.data?.document
+        if (typeof document?.document_id !== 'string' || typeof document.url !== 'string') {
+          lastError = new Error('document create returned no url')
+          continue
+        }
+        return { url: document.url, documentId: document.document_id }
+      } catch (error) {
+        lastError = error
+        // A missing docx scope is a configuration gap, not a transient failure:
+        // remember it so later replies do not retry this identity every time.
+        const message = error instanceof Error ? error.message : String(error)
+        if (message.includes('99991672') || message.includes('has not applied for the required scope')) {
+          this.docDenied.add(identity)
+        }
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('cannot create document')
+  }
+
+  /** Send a fresh message into a chat, choosing post for supported Markdown. */
+  async send(chatId: string, text: string, keySuffix = '0'): Promise<string | undefined> {
+    const markdown = LarkCli.isMarkdown(text)
+    if (this.dryRun) {
+      this.logger?.info(`feishu-bot[dry-run]: send ${markdown ? 'markdown' : 'text'} to ${chatId}: ${text}`)
       return undefined
     }
     const { stdout } = await this.run([
       'im', '+messages-send',
       '--chat-id', chatId,
-      '--text', text,
+      ...(markdown ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
+      '--idempotency-key', `feishu-send-${chatId.slice(0, 18)}-${keySuffix}`,
     ])
     return parseMessageId(stdout)
   }

@@ -28,8 +28,10 @@ import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ExecLike } from './src/approval.js'
 import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
-import type { HostContext, Job, SessionEventLike, SessionLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
+import type { HostContext, Job, SessionEventLike, SessionLike, SubagentsLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
+import { decideReply, docSummary } from './src/format/decide.js'
+import { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
 import { configProblem, normalizeConfig } from './src/config.js'
 import { SeenStore } from './src/dedup.js'
@@ -54,6 +56,9 @@ const BACKOFF_JITTER = 0.2
 export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangerousCommand, parseApprovalReply, summarizeCommand } from './src/approval.js'
 export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
+export { decideReply, docSummary, hasMarkdownTable, markdownMarkers, DEFAULT_REPLY_POLICY } from './src/format/decide.js'
+export { ACK_POOL, pickAckReaction } from './src/format/reaction.js'
+export type { ReplyKind, ReplyPlan, ReplyPolicy, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent, routeThreadKey } from './src/event.js'
@@ -427,8 +432,10 @@ export class FeishuBot {
   acknowledge(event: FeishuEvent): void {
     if (this.config.ackReaction === '' || this.reactionOff) return
     if (this.shouldPlaceholder()) return
+    const emoji = pickAckReaction(this.config.ackReaction, event.messageId)
+    if (emoji === '') return
     const startedAt = Date.now()
-    this.cli.react(event.messageId, this.config.ackReaction)
+    this.cli.react(event.messageId, emoji)
       .then(() => {
         this.reactionFailures = 0
         this.metrics.observe('ackMs', Date.now() - startedAt)
@@ -1039,7 +1046,9 @@ export class FeishuBot {
     }
     let answer
     try {
-      answer = await this.promptAndCollect(sessionId, text, event)
+      const delegated = await this.shouldDelegate(sessionId)
+      const delegatedAnswer = delegated ? await this.runInSubagent(sessionId, text) : undefined
+      answer = delegatedAnswer ?? await this.promptAndCollect(sessionId, text, event)
     } catch (error) {
       if (this.stopping) return
       if ((error as { code?: string }).code === 'FEISHU_CANCELLED') {
@@ -1065,6 +1074,19 @@ export class FeishuBot {
       }
       return
     }
+    const plan = decideReply(answer, {
+      docsEnabled: this.config.docsEnabled,
+      docThresholdChars: this.config.docThresholdChars,
+      docThresholdLines: this.config.docThresholdLines,
+    })
+    if (plan.kind === 'doc') {
+      const chunks = await this.documentChunks(event, answer, plan.reason)
+      const delivered = await this.deliver(event, await placeholder$, chunks)
+      this.metrics.inc(delivered ? 'jobsSucceeded' : 'jobsFailed')
+      this.metrics.observe('jobTotalMs', Date.now() - startedAt)
+      this.ctx.logger.info(`feishu-bot: answered chat=${event.chatId} session=${sessionId} as=doc in ${Date.now() - startedAt}ms`)
+      return
+    }
     const chunks = splitReply(answer, this.config.maxReplyChars)
     if (chunks.length === 0) {
       this.metrics.inc('jobsEmpty')
@@ -1075,6 +1097,111 @@ export class FeishuBot {
     this.metrics.inc(delivered ? 'jobsSucceeded' : 'jobsFailed')
     this.metrics.observe('jobTotalMs', Date.now() - startedAt)
     this.ctx.logger.info(`feishu-bot: answered chat=${event.chatId} session=${sessionId} in ${Date.now() - startedAt}ms`)
+  }
+
+  /**
+   * Whether this task should run in a child agent instead of the main Session.
+   *
+   * Delegation is opt-in: it needs the subagent seam, a live parent Agent, and a
+   * Session whose context pressure or turn count passed the threshold. Anything
+   * else keeps the plain main-Session path, which is cheaper and keeps history.
+   */
+  async shouldDelegate(sessionId: string): Promise<boolean> {
+    if (!this.config.taskSubagentEnabled) return false
+    if (this.ctx.subagents === undefined) return false
+    const digest = await this.sessionDigest(sessionId).catch(() => undefined)
+    if (digest === undefined) return false
+    const pressure = digest.large === true
+    if (pressure) return true
+    const stats = this.digestCache.get(sessionId)
+    return stats !== undefined && stats.large === true
+  }
+
+  /**
+   * Run one turn inside a child agent so the main Session keeps its context.
+   *
+   * The child receives only the question, never the main history; its final
+   * assistant text is the answer. The activation is always disposed, so a failed
+   * child cannot leak resources.
+   */
+  async runInSubagent(sessionId: string, text: string): Promise<string | undefined> {
+    const subagents = this.ctx.subagents
+    if (subagents === undefined) return undefined
+    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
+    const parent = (resolved as { agent?: unknown }).agent
+    if (parent === undefined || parent === null) return undefined
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Math.max(this.config.timeoutMs, 60_000))
+    timer.unref?.()
+    let activation
+    try {
+      activation = await subagents.startActivation({
+        provider: 'subagent-spawn-in-process',
+        parent,
+        prompt: [{ type: 'text', text }],
+        signal: controller.signal,
+        delivery: 'caller',
+        label: 'feishu-task',
+      })
+      this.metrics.inc('taskDelegated')
+      const result = await activation.result
+      const answer = (result.output ?? [])
+        .map(block => (typeof block?.text === 'string' ? block.text : ''))
+        .join('\n')
+        .trim()
+      if (answer === '') {
+        this.ctx.logger.warn(`feishu-bot: task subagent returned no text (${String(result.stopReason)})`)
+        return undefined
+      }
+      return answer
+    } catch (error) {
+      this.metrics.inc('taskDelegateFailed')
+      this.ctx.logger.warn(`feishu-bot: task subagent failed: ${String(error)}`)
+      return undefined
+    } finally {
+      clearTimeout(timer)
+      if (activation !== undefined) await activation.dispose().catch(() => {})
+    }
+  }
+
+  /**
+   * Turn a long or tabular answer into a document plus one link message.
+   *
+   * Any failure falls back to the original text so the user always gets the
+   * answer; the document is best effort, the reply is not.
+   */
+  async documentChunks(event: FeishuEvent, answer: string, reason: string): Promise<string[]> {
+    const title = await this.docTitle(event)
+    try {
+      const created = await this.cli.createDoc(title, answer)
+      if (created !== undefined) {
+        this.metrics.inc('docCreated')
+        this.ctx.logger.info(`feishu-bot: doc ${created.documentId} for ${event.chatId} (${reason}, ${answer.length} chars)`)
+        const summary = docSummary(answer)
+        const parts = [
+          summary === '' ? '内容已整理为文档。' : `**内容已整理为文档**
+
+${summary}`,
+          `[查看完整内容](${created.url})`,
+        ]
+        return [parts.join('\n\n')]
+      }
+    } catch (error) {
+      this.metrics.inc('docFailed')
+      this.ctx.logger.warn(`feishu-bot: cannot create doc for ${event.chatId}: ${String(error)}`)
+    }
+    return splitReply(answer, this.config.maxReplyChars)
+  }
+
+  /** Document title: chat or topic name plus a 24-hour timestamp. */
+  async docTitle(event: FeishuEvent): Promise<string> {
+    const name = await this.chatName(event.chatId).catch(() => undefined)
+    const stamp = new Date().toLocaleString([], {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23',
+    })
+    const base = typeof name === 'string' && name !== '' ? name : event.chatId.slice(-8)
+    return `${base} · ${stamp}`
   }
 
   /** Immediate acknowledgement: a reply the final answer later replaces. */
@@ -1782,6 +1909,12 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
   }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0, onStatusChange: () => notifyStatus?.() }))
+  // The subagent seam is optional: without it, long tasks stay in the main
+  // Session instead of failing.
+  if (ctx.subagents === undefined) {
+    const seam = ctx.get('subagents')
+    if (seam !== undefined && seam !== null) ctx.subagents = seam as SubagentsLike
+  }
   const host = new BotHost(ctx, base, bots)
   notifyStatus = () => host.notifyBindings()
   sharedRegistry.onChange = () => host.notifyBindings()

@@ -627,3 +627,51 @@ test('reading a thread claims its topic conversation', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a long-context task runs in a subagent when delegation is enabled', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+  try {
+    let started = 0
+    let disposed = 0
+    bot.ctx.subagents = {
+      async startActivation(spec) {
+        started += 1
+        assert.equal(spec.provider, 'subagent-spawn-in-process')
+        assert.equal(spec.delivery, 'caller')
+        assert.equal(spec.parent, 'agent-1')
+        return {
+          childId: 'ses_child',
+          result: Promise.resolve({ output: [{ type: 'text', text: '来自子代理的答案' }], stopReason: 'completed' }),
+          async dispose() { disposed += 1 },
+        }
+      },
+    }
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    bot.ctx.sessionController.projections = async () => ({
+      values: {
+        turnOutline: { turns: [] },
+        sessionStats: { turns: 200 },
+        contextPressure: { surfaceTokens: 200_000 },
+      },
+    })
+    const answer = await bot.runInSubagent('ses_1', '整理一份长报告')
+    assert.equal(answer, '来自子代理的答案')
+    assert.equal(started, 1)
+    assert.equal(disposed, 1)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('delegation stays off unless enabled', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    bot.ctx.subagents = { async startActivation() { throw new Error('must not be called') } }
+    assert.equal(await bot.shouldDelegate('ses_1'), false)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
