@@ -328,7 +328,17 @@ export class FeishuBot {
     }
     for (const pending of this.pending.values()) pending.reject(new Error('feishu-bot disposed'))
     this.pending.clear()
-    for (const chatId of [...this.approvals.keys()]) this.settleApproval(chatId, 'cancelled')
+    // A pending approval would otherwise vanish without a word when the plugin
+    // reloads; say so, best effort and time-boxed, before tearing down the CLI.
+    const pendingApprovals = [...this.approvals.keys()]
+    if (pendingApprovals.length > 0) {
+      await Promise.race([
+        Promise.allSettled(pendingApprovals.map(chatId =>
+          this.cli.send(chatId, '插件正在重启，挂起的审批已作废。', `reload-${Date.now()}`))),
+        new Promise(resolve => setTimeout(resolve, 800)),
+      ]).catch(() => {})
+    }
+    for (const chatId of pendingApprovals) this.settleApproval(chatId, 'cancelled')
     this.queue.close()
     this.consumer?.terminate()
     this.consumer = undefined
@@ -570,6 +580,11 @@ export class FeishuBot {
         this.ctx.logger.warn(`feishu-bot: cannot persist enabled chat ${event.chatId}: ${String(error)}`)
       })
     }
+    if (this.config.mentionPolicy === 'first' && !this.isFirstMentioned(event)) {
+      this.metrics.inc('ignoredMultiBot')
+      this.ctx.logger.debug(`feishu-bot: another bot is mentioned first in ${event.chatId}`)
+      return
+    }
     if (!acceptEvent(event, this.config, this.routing, true)) {
       this.metrics.inc('ignored')
       this.ctx.logger.debug(`feishu-bot: ignore chat=${event.chatId} type=${event.messageType}`)
@@ -682,6 +697,25 @@ export class FeishuBot {
         at: value.at,
         approver: this.config.approveUsers.includes(value.senderId),
       }))
+  }
+
+  /**
+   * Whether this bot is the first of ours mentioned in the message.
+   *
+   * Used by `mentionPolicy: first` so two bots in one group do not both answer.
+   * A message that mentions none of ours falls back to true and is filtered by
+   * the normal accept path.
+   */
+  isFirstMentioned(event: FeishuEvent): boolean {
+    const mine = new Set<string>([this.config.botId])
+    if (this.config.botOpenId !== undefined) mine.add(this.config.botOpenId)
+    if (this.config.botName !== '') mine.add(this.config.botName)
+    const ours = event.mentions
+      .map((mention, index) => ({ index, id: mention.id ?? '' }))
+      .filter(entry => mine.has(entry.id))
+    if (ours.length <= 1) return true
+    // Another one of our bots is mentioned earlier in the same message.
+    return ours[0]?.index === ours.map(entry => entry.index)[0]
   }
 
   /** Whether this request must be approved before the bot acts on it. */

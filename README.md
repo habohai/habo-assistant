@@ -203,6 +203,7 @@ bots:
 | `taskSubagentProvider` | `spawn` | 委派使用的 subagent 后端名 |
 | `requestApproval` | `non-owner` | 谁的请求需要你批准：`non-owner` / `all` / `off` |
 | `requestTrustMs` | 30 分钟 | 一次同意后该人在该群的免审时长；`0` 关闭 |
+| `mentionPolicy` | `all` | 一条消息 @ 多个机器人时：`all` 都答，`first` 只让第一个答 |
 | `approvalCards` | `false` | 是否用互动卡片审批（需要应用配置卡片回调） |
 | `approvalChannel` | `feishu` | 审批渠道：`feishu`（发群里）或 `dsh`（交给桌面端） |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
@@ -278,7 +279,8 @@ bots:
 - **你的同意是授权，DSH 权限预设是边界**：同意之后能做什么仍由 `permission-set` 决定；
 - 超时与「审批请求没发出」是两种不同结果，提示文案分开，不会一次超时发两条消息；
 - 没有挂起审批时回「同意」，直接回「当前没有待审批的命令」，不消耗模型回合；
-- 「停止」会取消排队任务、正在执行的任务以及挂起的审批。
+- 「停止」会取消排队任务、正在执行的任务以及挂起的审批；
+- 插件重载时若有挂起的审批，会先发一句「插件正在重启，挂起的审批已作废」，不再静默消失。
 
 配置：
 

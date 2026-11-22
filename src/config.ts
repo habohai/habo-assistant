@@ -76,6 +76,13 @@ export interface Config {
    * session asks once. 0 disables trust entirely.
    */
   requestTrustMs: number
+  /**
+   * Which bot answers when one message mentions several of ours.
+   *
+   * `all` is the historical behaviour; `first` keeps only the first mentioned
+   * bot answering, so a group with two bots does not get two replies.
+   */
+  mentionPolicy: 'all' | 'first'
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -169,6 +176,7 @@ export function normalizeConfig(raw: unknown): Config {
       ? value.requestApproval
       : 'non-owner',
     // 0 is a meaningful value here (trust disabled), so it bypasses integer().
+    mentionPolicy: value.mentionPolicy === 'first' ? 'first' : 'all',
     requestTrustMs: value.requestTrustMs === 0
       ? 0
       : integer('requestTrustMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),

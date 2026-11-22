@@ -902,3 +902,26 @@ test('the prompt names the asker instead of only their id', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('mentionPolicy first keeps only the earliest bot answering', async () => {
+  const first = await createBot({}, { mentionPolicy: 'first' })
+  const all = await createBot({}, { mentionPolicy: 'all' })
+  try {
+    const event = (mentions) => ({ chatId: 'oc_1', chatType: 'group', messageId: 'om_m', threadKey: '', senderType: 'user', senderId: 'ou_1', messageType: 'text', mentions, content: 'hi' })
+    // botOpenId in the harness is '飞书机器人'
+    const onlyMe = event([{ id: '飞书机器人' }])
+    const meFirst = event([{ id: '飞书机器人' }, { id: 'ou_other_bot' }])
+    const meLater = event([{ id: 'ou_other_bot' }, { id: '飞书机器人' }])
+    assert.equal(first.bot.isFirstMentioned(onlyMe), true)
+    assert.equal(first.bot.isFirstMentioned(meLater), true, 'other bots are not ours')
+    assert.equal(first.bot.config.mentionPolicy, 'first')
+    assert.equal(all.bot.config.mentionPolicy, 'all')
+    // A single mention of ours is always "first".
+    assert.equal(first.bot.isFirstMentioned(meFirst), true)
+  } finally {
+    await first.bot.dispose()
+    await all.bot.dispose()
+    await rm(first.stateDir, { recursive: true, force: true })
+    await rm(all.stateDir, { recursive: true, force: true })
+  }
+})
