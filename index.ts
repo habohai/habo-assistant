@@ -83,6 +83,11 @@ function firstNonEmpty(...values: unknown[]): string {
 
 type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
+/** Mutable holder for the optional subagent seam, filled after inject resolves. */
+export interface SubagentSeam {
+  current?: SubagentsLike
+}
+
 export interface BotServices {
   registry?: BindingRegistry
   seen?: SeenStore
@@ -90,6 +95,7 @@ export interface BotServices {
   botNames?: ReadonlyMap<string, string>
   isPrimary?: boolean
   onStatusChange?: () => void
+  subagents?: SubagentSeam
 }
 
 interface PendingTurn {
@@ -164,6 +170,8 @@ export class FeishuBot {
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
   /** conversationKey -> last delegated task, so a follow-up keeps its thread. */
+  /** Optional seam holder; public so hosts and tests can inject a backend. */
+  readonly subagents: SubagentSeam
   private readonly tasks: Map<string, FeishuTaskState>
   /** conversationKey -> live subagent activation, so stop can cancel it. */
   private readonly activations: Map<string, SubagentActivationLike>
@@ -180,6 +188,7 @@ export class FeishuBot {
     this.config = config
     this.routing = config.routing
     const botId = config.botId ?? config.botOpenId ?? config.botName ?? 'default'
+    this.subagents = services.subagents ?? { current: undefined }
     this.registry = new BotBindings(services.registry ?? new BindingRegistry(config.stateDir, botId), botId)
     this.seen = services.seen ?? new SeenStore(join(config.stateDir, 'seen.jsonl'), { logger: ctx.logger })
     this.metrics = new Metrics()
@@ -1235,7 +1244,7 @@ export class FeishuBot {
    */
   async shouldDelegate(sessionId: string): Promise<boolean> {
     if (!this.config.taskSubagentEnabled) return false
-    if (this.ctx.subagents === undefined) return false
+    if (this.subagentSeam() === undefined) return false
     const pressure = await this.sessionPressure(sessionId)
     if (pressure === undefined) return false
     return pressure.surfaceTokens > this.config.taskSubagentContextThreshold
@@ -1247,7 +1256,7 @@ export class FeishuBot {
    * Removed once the delegation path is verified end to end.
    */
   async delegateProbe(): Promise<Record<string, unknown>> {
-    const seam = this.ctx.subagents
+    const seam = this.subagentSeam()
     if (seam === undefined) return { error: 'subagents service missing' }
     const backend = this.taskBackendStatus()
     const sessionId = [...this.sessionContexts.keys()][0]
@@ -1275,9 +1284,19 @@ export class FeishuBot {
     }
   }
 
+  /**
+   * The subagent seam, when the host exposes it.
+   *
+   * Read through the holder rather than `ctx.subagents`: Cordis throws on
+   * undeclared service access, so a missing service must not be probed directly.
+   */
+  subagentSeam(): SubagentsLike | undefined {
+    return this.subagents.current
+  }
+
   /** Whether the configured delegation backend is actually registered. */
   taskBackendStatus(): { configured: string; registered: boolean } {
-    const seam = this.ctx.subagents
+    const seam = this.subagentSeam()
     const configured = this.config.taskSubagentProvider
     if (seam === undefined) return { configured, registered: false }
     if (typeof seam.getProvider !== 'function') return { configured, registered: false }
@@ -1318,7 +1337,7 @@ export class FeishuBot {
    * child cannot leak resources.
    */
   async runInSubagent(conversationKey: string, sessionId: string, text: string): Promise<string | undefined> {
-    const subagents = this.ctx.subagents
+    const subagents = this.subagentSeam()
     if (subagents === undefined) return undefined
     const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
     const parent = (resolved as { agent?: unknown }).agent
@@ -2146,6 +2165,9 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   const sharedChats = new ChatDirectory(base.stateDir)
   const botNames = new Map(base.bots.map(bot => [bot.id, bot.name]))
   let notifyStatus: (() => void) | undefined
+  // Held by reference so the seam can appear after the inject callback resolves,
+  // without any bot reading an undeclared service off its context.
+  const seam: SubagentSeam = { current: undefined }
   const bots = base.bots.map((bot, index) => new FeishuBot(ctx, {
     ...base,
     botId: bot.id,
@@ -2155,13 +2177,13 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     allowChats: bot.allowChats,
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
-  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0, onStatusChange: () => notifyStatus?.() }))
+  }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0, onStatusChange: () => notifyStatus?.(), subagents: seam }))
   // The subagent seam is optional: bind it only when the host exposes it, so
   // long tasks keep working in the main Session when it is absent.
   ctx.effect(() => {
     ctx.inject(['subagents'], (scope: HostContext) => {
-      ctx.subagents = scope.subagents
-      return () => { ctx.subagents = undefined }
+      seam.current = scope.subagents
+      return () => { seam.current = undefined }
     })
   }, 'feishu-bot: subagent seam')
   const host = new BotHost(ctx, base, bots)

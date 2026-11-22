@@ -634,7 +634,7 @@ test('a long-context task runs in a subagent when delegation is enabled', async 
   try {
     let started = 0
     let disposed = 0
-    bot.ctx.subagents = {
+    bot.subagents.current = {
       async startActivation(spec) {
         started += 1
         // The registered backend default is `spawn`; the package name is not a backend.
@@ -670,7 +670,7 @@ test('a long-context task runs in a subagent when delegation is enabled', async 
 test('delegation stays off unless enabled', async () => {
   const { bot, stateDir } = await createBot()
   try {
-    bot.ctx.subagents = { async startActivation() { throw new Error('must not be called') } }
+    bot.subagents.current = { async startActivation() { throw new Error('must not be called') } }
     assert.equal(await bot.shouldDelegate('ses_1'), false)
   } finally {
     await bot.dispose()
@@ -681,7 +681,7 @@ test('delegation stays off unless enabled', async () => {
 test('delegation follows the configured pressure and turn thresholds', async () => {
   const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true, taskSubagentContextThreshold: 10000, taskSubagentTurnThreshold: 50 })
   try {
-    bot.ctx.subagents = { async startActivation() { throw new Error('unused') } }
+    bot.subagents.current = { async startActivation() { throw new Error('unused') } }
     bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 500 } } })
     assert.equal(await bot.shouldDelegate('ses_1'), false)
     bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 20000 } } })
@@ -699,7 +699,7 @@ test('a follow-up task reuses the previous summary and can be cancelled', async 
   try {
     const prompts = []
     const activations = []
-    bot.ctx.subagents = {
+    bot.subagents.current = {
       async startActivation(spec) {
         prompts.push(spec.prompt.map(part => part.text).join('\n'))
         let dispose = 0
@@ -736,7 +736,7 @@ test('cancelTask disposes a running activation', async () => {
     let disposed = 0
     let release
     const gate = new Promise(resolve => { release = resolve })
-    bot.ctx.subagents = {
+    bot.subagents.current = {
       async startActivation() {
         return {
           childId: 'ses_child',
