@@ -204,6 +204,9 @@ bots:
 | `requestApproval` | `non-owner` | 谁的请求需要你批准：`non-owner` / `all` / `off` |
 | `requestTrustMs` | 30 分钟 | 一次同意后该人在该群的免审时长；`0` 关闭 |
 | `mentionPolicy` | `all` | 一条消息 @ 多个机器人时：`all` 都答，`first` 只让第一个答 |
+| `approvalMode` | `request` | 审批发生在 `request`（消息）/ `action`（动作）/ `off` |
+| `actionApprovalTools` | `[]` | 动作模式下算"动手"的工具；空 = 内置清单 |
+| `alwaysAskDangerous` | `true` | 危险命令即使有信任窗口也再问一次 |
 | `approvalCards` | `false` | 是否用互动卡片审批（需要应用配置卡片回调） |
 | `approvalChannel` | `feishu` | 审批渠道：`feishu`（发群里）或 `dsh`（交给桌面端） |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
@@ -292,6 +295,25 @@ requestTrustMs: 1800000    # 一次同意的有效期；0 = 每次都要批
 approvalChannel: feishu    # feishu（群里问）| dsh（交给桌面端）
 approvalTimeoutMs: 120000  # 单次审批超时
 ```
+
+### 动作审批（可选）
+
+`approvalMode: action` 把审批点从"消息"下移到"动作"：
+
+```text
+别人 @ → 直接回答（读文件、搜索、查资料都不打扰你）
+       → 要执行 bash / 改文件时 → 群里 @ 你
+```
+
+```yaml
+approvalMode: action        # request（默认）| action | off
+actionApprovalTools: []     # 空 = 内置清单
+alwaysAskDangerous: true    # 危险命令即使有信任也再问
+```
+
+内置"动手"清单：`bash`、`pwsh`、`write`、`edit`、`apply_patch`、`str_replace_editor`、`terminal_*`、`job_kill`、`schedule_create`、`subagent`、`workflow`。
+
+**`request` 与 `action` 互斥**：同时生效会让同一次操作问你两遍。
 
 ### 关于互动卡片按钮
 
