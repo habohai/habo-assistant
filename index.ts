@@ -30,6 +30,8 @@ import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
 import type { HostContext, Job, SessionEventLike, SessionLike, SubagentActivationLike, SubagentsLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
+import { describeToolCall, isMutatingTool } from './src/action.js'
+import { DEFAULT_DENY_PATTERNS, compileDenyPatterns, isDangerousCommand } from './src/approval.js'
 import { decideReply } from './src/format/decide.js'
 import { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 import { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
@@ -59,6 +61,7 @@ const BACKOFF_JITTER = 0.2
 export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangerousCommand, parseApprovalReply, summarizeCommand } from './src/approval.js'
 export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
+export { MUTATING_TOOLS, READ_ONLY_TOOLS, describeToolCall, isMutatingTool } from './src/action.js'
 export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 export { idempotencyKey } from './src/lark.js'
@@ -183,7 +186,7 @@ export class FeishuBot {
   /** sessionId -> chatId, so an approval can be asked in the right chat. */
   private readonly sessionChats: Map<string, Set<string>>
   /** Latest trigger context per session, so approvals can stay in its topic. */
-  private readonly sessionContexts: Map<string, { chatId: string; threadId: string; messageId: string }>
+  private readonly sessionContexts: Map<string, { chatId: string; threadId: string; messageId: string; senderId: string }>
   /** chatId -> pending approval entry (at most one per chat). */
   readonly approvals: Map<string, ApprovalEntry>
   /** Filled by the startup probe: only newer lark-cli builds can edit a sent message. */
@@ -210,6 +213,8 @@ export class FeishuBot {
    * under each bot; this is the only reliable way to fill `approveUsers` per bot.
    */
   private readonly recentSenders: Map<string, { senderId: string; senderName: string; at: number }>
+  /** Compiled destructive-command patterns used by action approval. */
+  private readonly dangerPatterns: RegExp[]
   /** Which identity can list group members: bot, the signed-in user, or none. */
   private memberListing: 'bot' | 'user' | 'none' | undefined
   /** open_id -> display name, so the prompt can name the asker. */
@@ -272,6 +277,7 @@ export class FeishuBot {
     this.requestTrust = new Map()
     this.recentSenders = new Map()
     this.senderNames = new Map()
+    this.dangerPatterns = compileDenyPatterns(DEFAULT_DENY_PATTERNS)
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -1053,7 +1059,77 @@ export class FeishuBot {
   async preExecute(exec: unknown, next: () => Promise<any>): Promise<any> {
     const decision = await this.outboundGate(exec)
     if (decision?.kind === 'deny') return decision
+    const action = await this.actionGate(exec)
+    // `ask` makes DSH route the call through `approval/request`, which is the
+    // Feishu prompt; anything else continues the waterfall.
+    if (action !== undefined) return action
     return next()
+  }
+
+  /**
+   * Ask before a bot session acts, when approval mode is `action`.
+   *
+   * Reads stay free. A trusted sender inside the trust window also stays free,
+   * except for commands that look destructive.
+   */
+  async actionGate(exec: unknown): Promise<{ kind: 'ask'; reason: string; displayReason: { en: string } } | undefined> {
+    if (this.config.approvalMode !== 'action') return undefined
+    const call = exec as {
+      name?: unknown
+      arguments?: unknown
+      agent?: { session?: { id?: unknown } }
+    } | undefined
+    const name = typeof call?.name === 'string' ? call.name : ''
+    if (!isMutatingTool(name, this.config.actionApprovalTools)) return undefined
+    const sessionId = call?.agent?.session?.id
+    if (typeof sessionId !== 'string' || sessionId === '') return undefined
+    const owner = await this.ownerSession(sessionId)
+    if (owner === undefined) return undefined
+    const context = this.sessionContexts.get(owner)
+    if (context === undefined) return undefined
+    const dangerous = this.isDangerousCall(call)
+    if (!dangerous && this.isTrusted(context.chatId, context.senderId)) return undefined
+    this.metrics.inc('actionGated')
+    const what = describeToolCall(name, call?.arguments)
+    return {
+      kind: 'ask',
+      reason: `群成员请求执行 ${what}`,
+      displayReason: { en: `Group member requests: ${what}` },
+    }
+  }
+
+  /**
+   * The bot session that owns a tool call.
+   *
+   * A delegated child runs tools under its own session id, so a miss here is
+   * resolved by walking to the subagent tree root instead of ignoring the call.
+   */
+  async ownerSession(sessionId: string): Promise<string | undefined> {
+    if (this.botSessions.has(sessionId)) return sessionId
+    if (this.sessionContexts.has(sessionId)) return sessionId
+    const seam = this.subagentSeam()
+    const rootOf = (seam as { rootOf?: (agent: unknown) => { session?: { id?: string } } } | undefined)?.rootOf
+    if (typeof rootOf !== 'function') return undefined
+    const agents = this.ctx.get('agents') as { get?: (id: string) => unknown } | undefined
+    const agent = agents?.get?.(sessionId)
+    if (agent === undefined || agent === null) return undefined
+    try {
+      const root = rootOf.call(seam, agent)
+      const rootId = root?.session?.id
+      return typeof rootId === 'string' && rootId !== '' ? rootId : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Whether a call carries a command that must always be confirmed. */
+  isDangerousCall(call: { name?: unknown; arguments?: unknown } | undefined): boolean {
+    if (this.config.alwaysAskDangerous !== true) return false
+    const name = typeof call?.name === 'string' ? call.name : ''
+    if (name !== 'bash' && name !== 'pwsh') return false
+    const command = this.bashCommand({ name, arguments: call?.arguments })
+    if (command === '') return false
+    return isDangerousCommand({ name, arguments: call?.arguments }, this.dangerPatterns)
   }
 
   private async outboundGate(exec: unknown): Promise<{ kind: 'allow' } | { kind: 'deny'; reason: string } | undefined> {
@@ -1476,7 +1552,7 @@ export class FeishuBot {
     let sessionId
     try {
       sessionId = await this.ensureSession(key, event, text)
-      this.sessionContexts.set(sessionId, { chatId: event.chatId, threadId: typeof event.threadId === 'string' ? event.threadId : '', messageId: event.messageId })
+      this.sessionContexts.set(sessionId, { chatId: event.chatId, threadId: typeof event.threadId === 'string' ? event.threadId : '', messageId: event.messageId, senderId: event.senderId })
     } catch (error) {
       this.metrics.inc('jobsFailed')
       this.ctx.logger.error(`feishu-bot: cannot open session for ${key}: ${String(error)}`)

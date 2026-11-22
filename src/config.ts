@@ -83,6 +83,18 @@ export interface Config {
    * bot answering, so a group with two bots does not get two replies.
    */
   mentionPolicy: 'all' | 'first'
+  /**
+   * Where approval happens: on the request, on the risky action, or never.
+   *
+   * `request` (default) asks before the bot works on someone else's message.
+   * `action` lets it answer and asks only before it executes a mutating tool.
+   * Never enable both: one operation would be approved twice.
+   */
+  approvalMode: 'request' | 'action' | 'off'
+  /** Tools treated as "acting" in action mode; empty uses the built-in list. */
+  actionApprovalTools: string[]
+  /** Ask again for a dangerous command even inside a trust window. */
+  alwaysAskDangerous: boolean
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -177,6 +189,11 @@ export function normalizeConfig(raw: unknown): Config {
       : 'non-owner',
     // 0 is a meaningful value here (trust disabled), so it bypasses integer().
     mentionPolicy: value.mentionPolicy === 'first' ? 'first' : 'all',
+    approvalMode: value.approvalMode === 'action' || value.approvalMode === 'off'
+      ? value.approvalMode
+      : 'request',
+    actionApprovalTools: list('actionApprovalTools'),
+    alwaysAskDangerous: value.alwaysAskDangerous !== false,
     requestTrustMs: value.requestTrustMs === 0
       ? 0
       : integer('requestTrustMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),

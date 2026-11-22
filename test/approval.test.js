@@ -685,3 +685,58 @@ test('a timeout is reported to DSH as unavailable, never as an unknown outcome',
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('action mode asks before a mutating tool and skips reads', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    const call = (name, args) => ({ name, arguments: args, agent: { session: { id: 'ses_1' } } })
+
+    assert.equal(await bot.actionGate(call('read', { path: '/etc/hosts' })), undefined)
+    const asked = await bot.actionGate(call('bash', { command: 'pnpm test' }))
+    assert.equal(asked?.kind, 'ask')
+    assert.match(asked.reason, /bash: pnpm test/)
+
+    // Once approved, the same person is trusted for the window.
+    bot.grantTrust('oc_1', 'ou_guest')
+    assert.equal(await bot.actionGate(call('bash', { command: 'pnpm test' })), undefined)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('action mode still asks for a destructive command inside the trust window', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    bot.grantTrust('oc_1', 'ou_guest')
+    const asked = await bot.actionGate({
+      name: 'bash',
+      arguments: { command: 'rm -rf /tmp/x' },
+      agent: { session: { id: 'ses_1' } },
+    })
+    assert.equal(asked?.kind, 'ask')
+    assert.equal(bot.metrics.snapshot().counts.actionGated, 1)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('action mode ignores sessions the bot does not own', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    const asked = await bot.actionGate({
+      name: 'bash',
+      arguments: { command: 'rm -rf /tmp/x' },
+      agent: { session: { id: 'ses_user_owned' } },
+    })
+    assert.equal(asked, undefined)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
