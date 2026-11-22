@@ -42,7 +42,7 @@ import { Metrics } from './src/metrics.js'
 import { ChatDirectory } from './src/chat-directory.js'
 import { artifactsProjection } from './src/artifacts-projection.js'
 import { taskProjection } from './src/task-projection.js'
-import { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle } from './src/text.js'
+import { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle, truncate } from './src/text.js'
 import { KeyedQueue } from './src/work.js'
 
 /** Feishu event key consumed by the bot. */
@@ -68,7 +68,7 @@ export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent, routeThreadKey } from './src/event.js'
 export { LarkCli, parseMessageId } from './src/lark.js'
 export { Metrics, percentile } from './src/metrics.js'
-export { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle } from './src/text.js'
+export { isStopCommand, privateSessionTitle, sessionTitle, splitReply, topicSessionTitle, truncate } from './src/text.js'
 export { KeyedQueue, Semaphore } from './src/work.js'
 export { taskProjection } from './src/task-projection.js'
 export { artifactsProjection } from './src/artifacts-projection.js'
@@ -553,6 +553,12 @@ export class FeishuBot {
       this.fireReply(event, '请描述你的问题。')
       return
     }
+    if (this.needsRequestApproval(event)) {
+      // The request is the unit of approval: whoever else addresses the bot must
+      // have the owner's consent before the agent does anything at all.
+      void this.gateRequest(event, text)
+      return
+    }
     const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     if (!this.queue.push(key, { event, text, enqueuedAt: Date.now() })) {
       this.metrics.inc('queueRejected')
@@ -561,6 +567,58 @@ export class FeishuBot {
     }
     this.metrics.inc('jobsQueued')
     this.acknowledge(event)
+  }
+
+  /** Whether this request must be approved before the bot acts on it. */
+  needsRequestApproval(event: FeishuEvent): boolean {
+    const policy = this.config.requestApproval
+    if (policy === 'off') return false
+    if (this.config.approveUsers.length === 0) return false
+    if (event.senderType !== 'user') return false
+    if (policy === 'all') return true
+    return !this.config.approveUsers.includes(event.senderId)
+  }
+
+  /**
+   * Ask the owner to approve one incoming request, then run it.
+   *
+   * Unlike the tool-level gate this does not look at which command the agent
+   * might pick: the group asked for something, so the owner decides whether the
+   * bot answers at all.
+   */
+  async gateRequest(event: FeishuEvent, text: string): Promise<void> {
+    const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
+    if (this.approvals.has(event.chatId)) {
+      this.metrics.inc('approvalBusy')
+      this.fireReply(event, '当前有一条审批还没处理，处理完再发。')
+      return
+    }
+    this.metrics.inc('requestGated')
+    this.acknowledge(event)
+    const allowed = await this.askFeishuApproval({
+      chatId: event.chatId,
+      sessionId: '',
+      replyTo: {
+        messageId: event.messageId,
+        threadId: typeof event.threadId === 'string' ? event.threadId : '',
+      },
+      request: {
+        reason: `群成员 <at user_id="${event.senderId}"></at> 请求：${truncate(text, 200)}`,
+        displayReason: `群成员请求：${truncate(text, 200)}`,
+      },
+    })
+    if (allowed !== 'allowed-once') {
+      this.metrics.inc('requestDenied')
+      this.fireReply(event, allowed === 'rejected' ? '该请求已被拒绝。' : '该请求未获批准，已作废。')
+      return
+    }
+    this.metrics.inc('requestAllowed')
+    if (!this.queue.push(key, { event, text, enqueuedAt: Date.now() })) {
+      this.metrics.inc('queueRejected')
+      this.fireReply(event, '当前排队较多，请稍后再试。')
+      return
+    }
+    this.metrics.inc('jobsQueued')
   }
 
   /**
@@ -693,7 +751,13 @@ export class FeishuBot {
     return this.askFeishuApproval({ chatId, sessionId, request })
   }
 
-  askFeishuApproval({ chatId, sessionId, request }: { chatId: string; sessionId: string; request: ApprovalRequest }): Promise<ApprovalOutcome> {
+  askFeishuApproval({ chatId, sessionId, request, replyTo }: {
+    chatId: string
+    sessionId: string
+    request: ApprovalRequest
+    /** Where the prompt goes; request-level approvals know the topic up front. */
+    replyTo?: { messageId?: string; threadId?: string }
+  }): Promise<ApprovalOutcome> {
     if (request.signal?.aborted) return Promise.resolve('cancelled')
     if (this.approvals.has(chatId)) {
       this.ctx.logger.warn(`feishu-bot: an approval is already pending in ${chatId}; refusing a second one`)
@@ -704,11 +768,12 @@ export class FeishuBot {
     // Feishu de-duplicates a send by its idempotency key for about an hour, so
     // the key must identify this approval, not just the chat.
     const approvalId = `ap_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const prompt = `⚠️ 需要审批\n\n${reason}\n\n@我 并回复「同意」执行，回复「拒绝」取消。\n仅限指定审批人，${seconds} 秒内有效。`
+    const mention = this.config.approveUsers.map(id => `<at user_id="${id}"></at>`).join(' ')
+    const prompt = `⚠️ 需要审批\n\n${reason}\n\n${mention === '' ? '' : `${mention} `}请回复「同意」或「拒绝」。\n仅限上述审批人，${seconds} 秒内有效。`
     this.metrics.inc('approvalAsked')
     const context = this.sessionContexts.get(sessionId)
-    const messageId = context?.messageId
-    const threadId = context?.threadId ?? ''
+    const messageId = replyTo?.messageId ?? context?.messageId
+    const threadId = replyTo?.threadId ?? context?.threadId ?? ''
     this.ctx.logger.info(`feishu-bot: approval requested chat=${chatId} session=${sessionId}`)
     return new Promise<ApprovalOutcome>(resolve => {
       const entry: ApprovalEntry = { approvalId, chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }

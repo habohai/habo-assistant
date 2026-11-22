@@ -210,6 +210,8 @@ test('an approval question is asked in the chat and resolved by a reply', async 
     const payload = sent[0].argv[sent[0].argv.indexOf('--text') + 1]
     assert.match(payload, /需要审批/)
     assert.match(payload, /rm -rf build/)
+    // The approver must be @-mentioned, or the prompt arrives silently.
+    assert.match(payload, /<at user_id="ou_1"><\/at>/)
     assert.equal(sent[0].argv.includes('--msg-type'), false)
 
     bot.onEventLine(approvalReply('同意'))
@@ -519,5 +521,69 @@ test('a bare 同意 with nothing pending answers without a model turn', async ()
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a non-owner request waits for the owner before the bot acts', async () => {
+  const { bot, stateDir, spawned } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    const event = {
+      chatId: 'oc_1', chatType: 'group', messageId: 'om_ask', threadKey: '',
+      senderType: 'user', senderId: 'ou_guest', messageType: 'text',
+      mentions: [{ id: 'ou_bot' }], content: '帮我把构建跑一下',
+    }
+    assert.equal(bot.needsRequestApproval(event), true)
+    const gated = bot.gateRequest(event, '帮我把构建跑一下')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    assert.equal(bot.queue.isIdle(), true, 'nothing may run before approval')
+    const approvalId = [...bot.approvals.values()][0].approvalId
+    bot.onCardActionLine(JSON.stringify({}))
+    bot.settleApproval('oc_1', 'allowed-once')
+    await gated
+    assert.equal(bot.queue.isIdle(), false, 'the approved request is queued')
+    assert.equal(bot.metrics.snapshot().counts.requestAllowed, 1)
+    assert.ok(approvalId.startsWith('ap_'))
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a rejected request never reaches the queue', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    const event = {
+      chatId: 'oc_1', chatType: 'group', messageId: 'om_ask2', threadKey: '',
+      senderType: 'user', senderId: 'ou_guest', messageType: 'text',
+      mentions: [{ id: 'ou_bot' }], content: '删一下临时目录',
+    }
+    const gated = bot.gateRequest(event, '删一下临时目录')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.settleApproval('oc_1', 'rejected')
+    await gated
+    assert.equal(bot.queue.isIdle(), true, 'a refused request must not run')
+    assert.equal(bot.metrics.snapshot().counts.requestDenied, 1)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('the owner and the off switch are not gated', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'] })
+  const off = await createBot({ approveUsers: ['ou_owner'], requestApproval: 'off' })
+  try {
+    const own = { chatId: 'oc_1', chatType: 'group', messageId: 'om_own', threadKey: '', senderType: 'user', senderId: 'ou_owner', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '跑一下测试' }
+    assert.equal(bot.needsRequestApproval(own), false)
+    const guest = { ...own, senderId: 'ou_guest' }
+    assert.equal(bot.needsRequestApproval(guest), true)
+    assert.equal(off.bot.needsRequestApproval(guest), false)
+  } finally {
+    await bot.dispose()
+    await off.bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+    await rm(off.stateDir, { recursive: true, force: true })
   }
 })

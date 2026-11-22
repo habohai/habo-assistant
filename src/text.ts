@@ -83,3 +83,10 @@ export function splitReply(text: string, limit: number): string[] {
   flush()
   return chunks
 }
+
+/** Shorten one line for an approval prompt without breaking a code point. */
+export function truncate(text: string, limit: number): string {
+  const value = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : ''
+  if (limit <= 0 || value.length <= limit) return value
+  return `${value.slice(0, limit)}…`
+}

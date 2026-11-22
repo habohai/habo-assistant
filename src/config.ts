@@ -60,6 +60,15 @@ export interface Config {
   approvalCards: boolean
   /** Where a bot-session approval is asked: the chat group (default) or DSH. */
   approvalChannel: 'feishu' | 'dsh'
+  /**
+   * Which incoming requests need an owner decision before the bot acts.
+   *
+   * `non-owner` (default) asks the owner whenever someone else addresses the
+   * bot — the request itself is the unit of approval, not the risk of whatever
+   * command the agent may later choose. `off` trusts the chat; `all` also asks
+   * for the owner's own messages.
+   */
+  requestApproval: 'off' | 'non-owner' | 'all'
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -149,6 +158,9 @@ export function normalizeConfig(raw: unknown): Config {
     taskSubagentProvider: string('taskSubagentProvider', 'spawn'),
     approvalCards: value.approvalCards === true,
     approvalChannel: value.approvalChannel === 'dsh' ? 'dsh' : 'feishu',
+    requestApproval: value.requestApproval === 'off' || value.requestApproval === 'all'
+      ? value.requestApproval
+      : 'non-owner',
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
     replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),
