@@ -145,3 +145,17 @@ test('the delegation backend defaults to the registered provider name', () => {
   // `subagent-spawn-in-process` is the package name; the provider registers as `spawn`.
   assert.equal(config.taskSubagentProvider, 'spawn')
 })
+
+test('each bot can carry its own approvers, because open_id is app-scoped', () => {
+  const config = normalizeConfig({
+    cwd: '/tmp',
+    stateDir: '/tmp/x',
+    approveUsers: ['ou_app_a'],
+    bots: [
+      { id: 'bot-a', name: 'A', openId: 'ou_app_a' },
+      { id: 'bot-b', name: 'B', openId: 'ou_app_b', approveUsers: ['ou_app_b_owner'] },
+    ],
+  })
+  assert.deepEqual(config.bots[0].approveUsers, ['ou_app_a'])
+  assert.deepEqual(config.bots[1].approveUsers, ['ou_app_b_owner'])
+})
