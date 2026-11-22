@@ -1359,6 +1359,10 @@ export class FeishuBot {
         signal: controller.signal,
         delivery: 'caller',
         label: 'feishu-task',
+        // The child must run in the same place and with the same preset as the
+        // Session that owns the conversation, not whatever the default is.
+        ...(this.config.cwd === '' ? {} : { cwd: this.config.cwd }),
+        ...(this.config.agentPreset === undefined ? {} : { agentPreset: this.config.agentPreset }),
         ...(maxDepth === undefined ? {} : { maxDepth }),
       })
       this.activations.set(conversationKey, activation)

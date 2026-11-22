@@ -854,3 +854,30 @@ test('an unavailable backend lets the main Session answer', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a delegated child inherits the workspace and preset', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true, cwd: '/tmp/work', agentPreset: 'feishu' })
+  try {
+    let seen
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    bot.subagents.current = {
+      async startActivation(spec) {
+        seen = spec
+        return {
+          childId: 'ses_child',
+          result: Promise.resolve({ output: [{ type: 'text', text: '好的' }], stopReason: 'completed' }),
+          async dispose() {},
+        }
+      },
+    }
+    const outcome = await bot.runInSubagent('oc_1', 'ses_1', '做点事')
+    assert.equal(outcome.status, 'answered')
+    assert.equal(seen.cwd, '/tmp/work')
+    assert.equal(seen.agentPreset, 'feishu')
+    assert.equal(seen.provider, 'spawn')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

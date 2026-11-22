@@ -200,6 +200,7 @@ bots:
 | `taskSubagentContextThreshold` | 120000 | 上下文 token 超过该值才委派 |
 | `taskSubagentTurnThreshold` | 80 | 轮次超过该值才委派 |
 | `taskSubagentTtlMs` | 30 分钟 | 任务摘要可复用的时长 |
+| `taskSubagentProvider` | `spawn` | 委派使用的 subagent 后端名 |
 | `approvalCards` | `true` | 审批是否使用互动卡片 |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
 
@@ -224,9 +225,13 @@ bots:
 
 - 群 / 话题仍然只绑定主 Session；
 - subagent 只拿到本轮问题，不复制主 Session 历史；
+- 子代理继承 `cwd` 和 `agentPreset`，在同一个工作区、同一套权限下执行；
 - 结果回到原群 / 话题，主 Session 不再被长任务撑大；
-- 委派失败时自动回落到主 Session 执行；
-- 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭。
+- **停止是终态**：取消或失败都不会让主 Session 再执行一遍；
+- 只有"根本没能创建子代理"时，才回落到主 Session 回答；
+- 同一群 30 分钟内的下一次委派会带上一轮结论，保证追问不断线（不是同一个子会话）；
+- 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭；
+- `taskSubagentProvider` 默认 `spawn`，就是 `ctx.subagents` 上注册的后端名。
 
 ## 确认表情
 
