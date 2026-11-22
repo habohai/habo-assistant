@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { FeishuBot, normalizeConfig, idempotencyKey } from '../lib/index.js'
+import { FeishuBot, normalizeConfig, idempotencyKey, BotHost } from '../lib/index.js'
 
 /** Minimal DSH surface: only what the bridge touches. */
 function createHarness({ failEdit = false, echoReplyId = false } = {}) {
@@ -923,5 +923,24 @@ test('mentionPolicy first keeps only the earliest bot answering', async () => {
     await all.bot.dispose()
     await rm(first.stateDir, { recursive: true, force: true })
     await rm(all.stateDir, { recursive: true, force: true })
+  }
+})
+
+test('the stats endpoint summarises approval counters across bots', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    bot.metrics.inc('requestGated')
+    bot.metrics.inc('requestGated')
+    bot.metrics.inc('actionGated')
+    const host = new BotHost(bot.ctx, bot.config, [bot])
+    const stats = host.stats()
+    const counts = stats.counts
+    assert.equal(counts.requestGated, 2)
+    assert.equal(counts.actionGated, 1)
+    assert.equal(stats.approvals, 0)
+    assert.equal(stats.trusted, 0)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
   }
 })

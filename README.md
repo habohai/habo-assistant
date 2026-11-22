@@ -349,6 +349,15 @@ GET /feishu-bot/events
 
 ## API（可选）
 
+| 端点 | 用途 |
+| --- | --- |
+| `GET /feishu-bot/api?action=health` | 就绪、消费者、审批数、能力（`memberListing`） |
+| `GET /feishu-bot/api?action=stats` | 计数器：`requestGated`、`actionGated`、`approvalAllowed`、`trustGranted` 等 |
+| `GET /feishu-bot/api?action=senders` | 每个 bot 视角下最近 @ 过它的人（用于填 `approveUsers`） |
+| `GET /feishu-bot/api?action=bindings` | 绑定列表 |
+| `GET /feishu-bot/events` | SSE 实时推送绑定变化 |
+
+
 `/feishu-bot/api` 供右侧栏和自动化使用：
 
 ```text

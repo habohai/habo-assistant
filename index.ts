@@ -739,6 +739,12 @@ export class FeishuBot {
     return !this.isTrusted(event.chatId, event.senderId)
   }
 
+  /** Number of live trust grants, for the stats endpoint. */
+  trustedCount(): number {
+    this.pruneTrust()
+    return this.requestTrust.size
+  }
+
   /** Whether this person may drive the bot in this chat without asking again. */
   isTrusted(chatId: string, senderId: string): boolean {
     const key = `${chatId}::${senderId}`
@@ -2337,6 +2343,22 @@ export class BotHost {
     await Promise.all(this.bots.map(bot => bot.dispose()))
   }
 
+  /** Approval and routing counters, for watching a rollout. */
+  stats(): Record<string, unknown> {
+    const merged: Record<string, number> = {}
+    for (const bot of this.bots) {
+      const counts = bot.metrics.snapshot().counts ?? {}
+      for (const [name, value] of Object.entries(counts)) {
+        if (typeof value === 'number') merged[name] = (merged[name] ?? 0) + value
+      }
+    }
+    return {
+      counts: merged,
+      approvals: this.bots.reduce((total, bot) => total + bot.approvals.size, 0),
+      trusted: this.bots.reduce((total, bot) => total + (bot.trustedCount?.() ?? 0), 0),
+    }
+  }
+
   /** Recent senders of every bot, for configuring per-bot approvers. */
   senderReport(): Array<Record<string, unknown>> {
     return this.bots.flatMap(bot => bot.senderReport().map(row => ({
@@ -2809,6 +2831,10 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   if (method === 'GET') {
     if (url.searchParams.get('action') === 'health') {
       sendJson(res, 200, { ok: true, value: bot.status() })
+      return
+    }
+    if (url.searchParams.get('action') === 'stats') {
+      sendJson(res, 200, { ok: true, value: bot.stats() })
       return
     }
     if (url.searchParams.get('action') === 'senders') {
