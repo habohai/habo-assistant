@@ -372,27 +372,35 @@ export class LarkCli {
     throw lastError instanceof Error ? lastError : new Error('cannot list group members')
   }
 
-  private static isMarkdown(text: string): boolean {
-    return /\*\*[^*]+\*\*|`[^`]+`|^#{1,6}\s|^\s*[-*+]\s+|^\s*\d+\.\s+|\[[^\]]+\]\([^\)]+\)|```/m.test(text)
-  }
-
-  /** Send a reply using Feishu post when the content contains supported Markdown. */
+  /** Send a reply: post for supported Markdown, plain text otherwise. */
   async replyFormatted(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
-    const markdown = LarkCli.isMarkdown(text)
+    const plan = decideReply(text)
     if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: reply ${markdown ? 'markdown' : 'text'} to ${messageId}: ${text}`)
+      this.logger?.info(`feishu-bot[dry-run]: reply ${plan.kind} to ${messageId}: ${text}`)
       return undefined
     }
-    const args = [
+    const args = (kind: 'text' | 'post'): string[] => [
       'im', '+messages-reply',
       '--message-id', messageId,
-      ...(markdown ? ['--markdown', text] : ['--text', text]),
+      ...(kind === 'post' ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
       '--idempotency-key', `feishu-${messageId.slice(0, 28)}-${keySuffix}`,
       ...(inThread === true ? ['--reply-in-thread'] : []),
     ]
-    const { stdout } = await this.run(args)
-    return parseMessageId(stdout)
+    const startedAt = Date.now()
+    try {
+      const { stdout } = await this.run(args(plan.kind))
+      this.logSend('reply', plan.kind, text, false, startedAt)
+      return parseMessageId(stdout)
+    } catch (error) {
+      // Feishu can reject a post payload this CLI produced; the answer still has
+      // to arrive, so degrade to plain text before giving up.
+      if (plan.kind !== 'post') throw error
+      this.logger?.warn?.(`feishu-bot: post reply rejected, retrying as text: ${String(error)}`)
+      const { stdout } = await this.run(args('text'))
+      this.logSend('reply', 'text', text, true, startedAt)
+      return parseMessageId(stdout)
+    }
   }
 
   async reply(messageId: string, text: string, options: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
@@ -434,19 +442,42 @@ export class LarkCli {
 
   /** Send a fresh message into a chat, choosing post for supported Markdown. */
   async send(chatId: string, text: string, keySuffix = '0'): Promise<string | undefined> {
-    const markdown = LarkCli.isMarkdown(text)
+    const plan = decideReply(text)
     if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: send ${markdown ? 'markdown' : 'text'} to ${chatId}: ${text}`)
+      this.logger?.info(`feishu-bot[dry-run]: send ${plan.kind} to ${chatId}: ${text}`)
       return undefined
     }
-    const { stdout } = await this.run([
+    const args = (kind: 'text' | 'post'): string[] => [
       'im', '+messages-send',
       '--chat-id', chatId,
-      ...(markdown ? ['--markdown', text] : ['--text', text]),
+      ...(kind === 'post' ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
-      '--idempotency-key', `feishu-send-${chatId.slice(0, 18)}-${keySuffix}`,
-    ])
-    return parseMessageId(stdout)
+      '--idempotency-key', `feishu-send-${chatId.slice(0, 18)}-${keySuffix}`.slice(0, 50),
+    ]
+    const startedAt = Date.now()
+    try {
+      const { stdout } = await this.run(args(plan.kind))
+      this.logSend('send', plan.kind, text, false, startedAt)
+      return parseMessageId(stdout)
+    } catch (error) {
+      if (plan.kind !== 'post') throw error
+      this.logger?.warn?.(`feishu-bot: post send rejected, retrying as text: ${String(error)}`)
+      const { stdout } = await this.run(args('text'))
+      this.logSend('send', 'text', text, true, startedAt)
+      return parseMessageId(stdout)
+    }
+  }
+
+  /** One structured line per outbound message, so routing is explainable. */
+  private logSend(op: 'send' | 'reply', kind: 'text' | 'post', text: string, degraded: boolean, startedAt: number): void {
+    this.logger?.debug?.(JSON.stringify({
+      event: 'feishu.message',
+      op,
+      kind,
+      degraded,
+      chars: typeof text === 'string' ? text.length : 0,
+      ms: Date.now() - startedAt,
+    }))
   }
 
   /**
