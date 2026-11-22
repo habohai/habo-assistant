@@ -52,6 +52,8 @@ export interface Config {
   taskSubagentTurnThreshold: number
   /** How long one conversation's task summary stays reusable. */
   taskSubagentTtlMs: number
+  /** Registered subagent backend name on `ctx.subagents` (spawn provider default). */
+  taskSubagentProvider: string
   /** Send approvals as interactive cards with buttons. */
   approvalCards: boolean
   timeoutMs: number
@@ -142,6 +144,9 @@ export function normalizeConfig(raw: unknown): Config {
     taskSubagentContextThreshold: integer('taskSubagentContextThreshold', 120_000, 10_000, 2_000_000),
     taskSubagentTurnThreshold: integer('taskSubagentTurnThreshold', 80, 5, 10_000),
     taskSubagentTtlMs: integer('taskSubagentTtlMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
+    // The provider registers under `providerName`, which defaults to `spawn`;
+    // the package name `subagent-spawn-in-process` is NOT a registered backend.
+    taskSubagentProvider: string('taskSubagentProvider', 'spawn'),
     approvalCards: value.approvalCards !== false,
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),

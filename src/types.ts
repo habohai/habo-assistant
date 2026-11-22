@@ -81,7 +81,21 @@ export interface SubagentsLike {
     delivery: 'parent' | 'caller'
     label?: string
     name?: string
+    cwd?: string
+    agentPreset?: string
+    maxDepth?: number
   }): Promise<SubagentActivationLike>
+  /** Look up a registered backend; returns undefined when the name is unknown. */
+  getProvider?(name: string): unknown
+  /** Host-configured delegation depth cap; absent when the seam cannot report it. */
+  resolveMaxDepth?(configured?: number | 'provider-managed'): number | undefined
+  /** Continue an existing child Session instead of starting a new one. */
+  sendMessage?(
+    parent: unknown,
+    childSessionId: string,
+    content: Array<{ type: 'text'; text: string }>,
+    options: { signal: AbortSignal },
+  ): Promise<unknown>
 }
 
 export interface HostContext {

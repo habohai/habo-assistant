@@ -942,6 +942,7 @@ export class FeishuBot {
       bindings: this.registry.entries().length,
       dynamicChats: this.chats.size,
       tasks: this.tasks.size,
+      taskBackend: this.taskBackendStatus(),
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
       bot: {
@@ -1241,6 +1242,52 @@ export class FeishuBot {
       || pressure.turns > this.config.taskSubagentTurnThreshold
   }
 
+  /**
+   * TEMPORARY diagnostic: start one throwaway child to prove the backend works.
+   * Removed once the delegation path is verified end to end.
+   */
+  async delegateProbe(): Promise<Record<string, unknown>> {
+    const seam = this.ctx.subagents
+    if (seam === undefined) return { error: 'subagents service missing' }
+    const backend = this.taskBackendStatus()
+    const sessionId = [...this.sessionContexts.keys()][0]
+    if (sessionId === undefined) return { error: 'no tracked session', backend }
+    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
+    const parent = (resolved as { agent?: unknown }).agent
+    if (parent === undefined || parent === null) return { error: 'no live parent agent', backend }
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    try {
+      const activation = await seam.startActivation({
+        provider: this.config.taskSubagentProvider,
+        parent,
+        prompt: [{ type: 'text', text: '只回复两个字：收到' }],
+        signal: controller.signal,
+        delivery: 'caller',
+        label: 'feishu-probe',
+      })
+      const result = await activation.result
+      const text = (result.output ?? []).map(block => block.text ?? '').join('').trim().slice(0, 120)
+      await activation.dispose().catch(() => {})
+      return { ok: true, backend, childId: activation.childId, stopReason: result.stopReason, text, ms: Date.now() - startedAt }
+    } catch (error) {
+      return { ok: false, backend, error: String(error), ms: Date.now() - startedAt }
+    }
+  }
+
+  /** Whether the configured delegation backend is actually registered. */
+  taskBackendStatus(): { configured: string; registered: boolean } {
+    const seam = this.ctx.subagents
+    const configured = this.config.taskSubagentProvider
+    if (seam === undefined) return { configured, registered: false }
+    if (typeof seam.getProvider !== 'function') return { configured, registered: false }
+    try {
+      return { configured, registered: seam.getProvider(configured) !== undefined }
+    } catch {
+      return { configured, registered: false }
+    }
+  }
+
   /** Context pressure and turn count of one Session, read from its projections. */
   async sessionPressure(sessionId: string): Promise<{ surfaceTokens: number; turns: number } | undefined> {
     const read = this.ctx.sessionController.projections
@@ -1285,13 +1332,17 @@ export class FeishuBot {
     timer.unref?.()
     let activation: SubagentActivationLike | undefined
     try {
+      const maxDepth = typeof subagents.resolveMaxDepth === 'function'
+        ? subagents.resolveMaxDepth()
+        : undefined
       activation = await subagents.startActivation({
-        provider: 'subagent-spawn-in-process',
+        provider: this.config.taskSubagentProvider,
         parent,
         prompt: [{ type: 'text', text: prompt }],
         signal: controller.signal,
         delivery: 'caller',
         label: 'feishu-task',
+        ...(maxDepth === undefined ? {} : { maxDepth }),
       })
       this.activations.set(conversationKey, activation)
       this.metrics.inc('taskDelegated')
@@ -2329,6 +2380,11 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   if (method === 'GET') {
     if (url.searchParams.get('action') === 'health') {
       sendJson(res, 200, { ok: true, value: bot.status() })
+      return
+    }
+    if (url.searchParams.get('action') === 'delegate-probe') {
+      const primary = bot.bots[0]
+      sendJson(res, 200, { ok: true, value: primary === undefined ? { error: 'no bot' } : await primary.delegateProbe() })
       return
     }
     if (url.searchParams.get('action') === 'chats') {

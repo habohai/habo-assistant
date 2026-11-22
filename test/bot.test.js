@@ -637,7 +637,8 @@ test('a long-context task runs in a subagent when delegation is enabled', async 
     bot.ctx.subagents = {
       async startActivation(spec) {
         started += 1
-        assert.equal(spec.provider, 'subagent-spawn-in-process')
+        // The registered backend default is `spawn`; the package name is not a backend.
+        assert.equal(spec.provider, 'spawn')
         assert.equal(spec.delivery, 'caller')
         assert.equal(spec.parent, 'agent-1')
         return {
