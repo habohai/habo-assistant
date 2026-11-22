@@ -251,7 +251,7 @@ test('a rejection resolves as rejected and non-approvers cannot answer', async (
   }
 })
 
-test('an unanswered approval times out as unavailable', async () => {
+test('an unanswered tool approval expires', async () => {
   const { bot, stateDir, listeners } = await createBot({ approveUsers: ['ou_1'] })
   const keepAlive = setInterval(() => {}, 50)
   try {
@@ -265,7 +265,9 @@ test('an unanswered approval times out as unavailable', async () => {
       reason: '命令审批：ls',
       signal: new AbortController().signal,
     }, () => Promise.resolve('unavailable'))
-    assert.equal(await pending, 'unavailable')
+    // Timeouts are distinct from "could not ask": the caller must not report a
+    // send failure for an approval the user simply never answered.
+    assert.equal(await pending, 'expired')
   } finally {
     clearInterval(keepAlive)
     await bot.dispose()
@@ -642,6 +644,24 @@ test('trust can be switched off', async () => {
     assert.equal(bot.needsRequestApproval(event), true)
     await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a request approval that expires sends one notice, not two', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], requestApproval: 'all' })
+  const keepAlive = setInterval(() => {}, 50)
+  try {
+    bot.config.approvalTimeoutMs = 20
+    const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_to', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '做点事' }
+    const gated = bot.gateRequest(event, '做点事')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    await gated
+    assert.equal(bot.metrics.snapshot().counts.requestDenied, 1)
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), false)
+  } finally {
+    clearInterval(keepAlive)
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
   }

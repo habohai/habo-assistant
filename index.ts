@@ -82,7 +82,7 @@ function firstNonEmpty(...values: unknown[]): string {
   return ''
 }
 
-type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' | 'expired'
 
 /** Mutable holder for the optional subagent seam, filled after inject resolves. */
 export interface SubagentSeam {
@@ -136,6 +136,8 @@ interface ApprovalRequest {
 interface ApprovalEntry {
   /** Identity of this approval; a click must match it to settle. */
   approvalId: string
+  /** A request approval gates a whole message; a tool approval gates one call. */
+  kind: 'tool' | 'request'
   chatId: string
   sessionId: string
   messageId?: string
@@ -689,6 +691,7 @@ export class FeishuBot {
     const allowed = await this.askFeishuApproval({
       chatId: event.chatId,
       sessionId: '',
+      kind: 'request',
       replyTo: {
         messageId: event.messageId,
         threadId: typeof event.threadId === 'string' ? event.threadId : '',
@@ -701,14 +704,18 @@ export class FeishuBot {
     if (allowed !== 'allowed-once') {
       this.metrics.inc('requestDenied')
       this.ctx.logger.info(`feishu-bot: request ${allowed} chat=${event.chatId} sender=${event.senderId}`)
-      this.fireReply(
-        event,
-        allowed === 'rejected'
-          ? '该请求已被拒绝。'
-          : allowed === 'cancelled'
-            ? '该请求已取消。'
-            : '审批请求没能发出（请看日志），本次请求已作废。',
-      )
+      // A timeout already sent its own notice; repeating it here would send two
+      // messages for one expiry.
+      if (allowed !== 'expired') {
+        this.fireReply(
+          event,
+          allowed === 'rejected'
+            ? '该请求已被拒绝。'
+            : allowed === 'cancelled'
+              ? '该请求已取消。'
+              : '审批请求没能发出（请看日志），本次请求已作废。',
+        )
+      }
       return
     }
     this.metrics.inc('requestAllowed')
@@ -851,12 +858,13 @@ export class FeishuBot {
     return this.askFeishuApproval({ chatId, sessionId, request })
   }
 
-  askFeishuApproval({ chatId, sessionId, request, replyTo }: {
+  askFeishuApproval({ chatId, sessionId, request, replyTo, kind = 'tool' }: {
     chatId: string
     sessionId: string
     request: ApprovalRequest
     /** Where the prompt goes; request-level approvals know the topic up front. */
     replyTo?: { messageId?: string; threadId?: string }
+    kind?: 'tool' | 'request'
   }): Promise<ApprovalOutcome> {
     if (request.signal?.aborted) return Promise.resolve('cancelled')
     if (this.approvals.has(chatId)) {
@@ -876,10 +884,14 @@ export class FeishuBot {
     const threadId = replyTo?.threadId ?? context?.threadId ?? ''
     this.ctx.logger.info(`feishu-bot: approval requested chat=${chatId} session=${sessionId}`)
     return new Promise<ApprovalOutcome>(resolve => {
-      const entry: ApprovalEntry = { approvalId, chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
+      const entry: ApprovalEntry = { approvalId, kind, chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
       this.approvals.set(chatId, entry)
       entry.timer = setTimeout(() => {
-        this.settleApproval(chatId, 'unavailable', '⏰ 审批超时，该命令没有执行。')
+        this.settleApproval(
+          chatId,
+          'expired',
+          kind === 'request' ? '⏰ 审批超时，该请求已作废。' : '⏰ 审批超时，该命令没有执行。',
+        )
       }, this.config.approvalTimeoutMs)
       entry.timer.unref?.()
       const signal = request?.signal
