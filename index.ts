@@ -1882,11 +1882,8 @@ export class BotHost {
   }
 }
 
-/** Services the bridge needs, plus optional ones whose absence only disables a feature. */
-export const inject = {
-  required: ['subprocess', 'sessionController', 'sessionProjections', 'tools', 'sessions', 'permissionPresets', 'webServer'],
-  optional: ['subagents'],
-}
+/** Services required by the bridge. */
+export const inject = ['subprocess', 'sessionController', 'sessionProjections', 'tools', 'sessions', 'permissionPresets', 'webServer']
 
 
 /**
@@ -1913,12 +1910,14 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
     approveUsers: bot.approveUsers,
     permissionPreset: bot.permissionPreset,
   }, { registry: sharedRegistry, seen: sharedSeen, chats: sharedChats, botNames, isPrimary: index === 0, onStatusChange: () => notifyStatus?.() }))
-  // The subagent seam is optional: without it, long tasks stay in the main
-  // Session instead of failing.
-  if (ctx.subagents === undefined) {
-    const seam = ctx.get('subagents')
-    if (seam !== undefined && seam !== null) ctx.subagents = seam as SubagentsLike
-  }
+  // The subagent seam is optional: bind it only when the host exposes it, so
+  // long tasks keep working in the main Session when it is absent.
+  ctx.effect(() => {
+    ctx.inject(['subagents'], (scope: HostContext) => {
+      ctx.subagents = scope.subagents
+      return () => { ctx.subagents = undefined }
+    })
+  }, 'feishu-bot: subagent seam')
   const host = new BotHost(ctx, base, bots)
   notifyStatus = () => host.notifyBindings()
   sharedRegistry.onChange = () => host.notifyBindings()

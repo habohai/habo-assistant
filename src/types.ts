@@ -96,6 +96,7 @@ export interface HostContext {
   subprocess: SubprocessLike
   sessionController: SessionControllerLike
   subagents?: SubagentsLike
+  inject(services: string[], callback: (scope: HostContext) => (() => void) | void): unknown
   sessionProjections: { register(definition: unknown): Promise<unknown> }
   tools: { register(definition: Record<string, unknown>): () => void }
   sessions: { get(sessionId: string): unknown }
