@@ -369,6 +369,36 @@ export class LarkCli {
   }
 
   /** Resolve the chat/topic context of one message (used for reply-to-topic claims). */
+  /**
+   * Display name of the person who sent a message.
+   *
+   * Feishu returns `sender_name` on read APIs, so this needs no contact scope —
+   * which matters because these apps do not have one.
+   */
+  async senderName(messageId: string): Promise<string | undefined> {
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+messages-mget',
+          '--message-ids', messageId,
+          '--as', identity,
+          '--json',
+        ])
+        const parsed = parseCliJson(stdout) as {
+          data?: { messages?: Array<{ sender?: { name?: unknown; sender_name?: unknown } }> }
+        }
+        const sender = parsed.data?.messages?.[0]?.sender
+        const name = typeof sender?.name === 'string' ? sender.name.trim() : ''
+        if (name !== '') return name
+        const raw = typeof sender?.sender_name === 'string' ? sender.sender_name.trim() : ''
+        if (raw !== '') return raw
+      } catch {
+        // Fall through to the next identity; a name is cosmetic, never fatal.
+      }
+    }
+    return undefined
+  }
+
   async messageContext(messageId: string): Promise<{ chatId: string; threadId: string } | undefined> {
     let lastError: unknown
     for (const identity of ['bot', 'user'] as const) {

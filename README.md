@@ -30,7 +30,7 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 | --- | --- |
 | 群 / 话题绑定 | `(chatId, threadId)` 唯一 Conversation；群主会话和话题互不串 |
 | 话题路由 | `routing: topic` 时，带 `thread_id` 的消息进入独立 Session，回复自动留在话题内 |
-| 多机器人 | 每个 bot 独立 lark-cli profile / consumer / 审批；共享绑定，bot 按需授权 |
+| 多机器人 | 每个 bot 独立 lark-cli profile / consumer / 审批人；共享绑定，bot 按需授权 |
 | 读消息认领 | 从 Session 读取群/话题消息后，该 Conversation 自动绑定到当前 Session |
 | 发消息认领 | 从 Session 发往群/话题后，该 Conversation 自动绑定到当前 Session |
 | 发送前校验 | `lark-cli` 群发/话题回复先校验 owner 和 bot，再认领；未授权直接拒绝 |
@@ -242,6 +242,18 @@ bots:
 - `auto` 在 `OnIt` / `GLANCE` / `Typing` 之间按消息稳定轮换，同一条消息重投不换；
 - 只使用飞书认可的 `emoji_type`；配置了未知类型会自动回退 `OnIt`；
 - 连续失败 3 次才关闭 reaction，避免一条错配置让反馈彻底消失。
+
+## 提示词头
+
+模型看到的每条消息都带一行上下文：
+
+```text
+[飞书群:赵老师答疑 | 机器人:… | 群内已绑定机器人:… | 提问人:海振国(ou_…)]
+你好
+```
+
+- `提问人` 优先显示真实姓名（取自消息接口的 `sender_name`，不需要通讯录权限），查不到时退回 open_id；
+- 姓名按人缓存，不会每条消息都查一次。
 
 ## 审批：谁能驱动机器人
 

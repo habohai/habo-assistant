@@ -881,3 +881,24 @@ test('a delegated child inherits the workspace and preset', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('the prompt names the asker instead of only their id', async () => {
+  const { bot, stateDir, prompts } = await createBot()
+  try {
+    bot.cli.senderName = async () => '海振国'
+    bot.onEventLine(eventLine)
+    await waitFor(() => prompts.length === 1)
+    finishTurn(bot, '好的')
+    await bot.queue.idle()
+    const header = prompts[0].content[0].text
+    assert.match(header, /提问人:海振国\(ou_1\)/)
+    // The name is cached so later questions do not pay for the lookup.
+    let lookups = 0
+    bot.cli.senderName = async () => { lookups += 1; return '海振国' }
+    await bot.senderLabel({ chatId: 'oc_1', senderId: 'ou_1', messageId: 'om_2' })
+    assert.equal(lookups, 0)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

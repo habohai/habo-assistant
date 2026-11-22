@@ -201,6 +201,8 @@ export class FeishuBot {
    * under each bot; this is the only reliable way to fill `approveUsers` per bot.
    */
   private readonly recentSenders: Map<string, { senderId: string; senderName: string; at: number }>
+  /** open_id -> display name, so the prompt can name the asker. */
+  private readonly senderNames: Map<string, string>
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
@@ -258,6 +260,7 @@ export class FeishuBot {
     this.cancelledTasks = new Set()
     this.requestTrust = new Map()
     this.recentSenders = new Map()
+    this.senderNames = new Map()
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -619,6 +622,23 @@ export class FeishuBot {
       + `${scopes.length === 0 ? '' : ` (missing: ${scopes.join(', ')})`}`
       + '; approval may not recognise you in this app',
     )
+  }
+
+  /**
+   * How the prompt names the asker: a real name when known, otherwise the id.
+   *
+   * The name is read once per person and cached; a failed lookup must never block
+   * or fail the question.
+   */
+  async senderLabel(event: FeishuEvent): Promise<string> {
+    const cached = this.senderNames.get(event.senderId)
+    if (cached !== undefined) return cached
+    const name = await this.cli.senderName(event.messageId).catch(() => undefined)
+    if (name === undefined || name === '') return event.senderId
+    this.senderNames.set(event.senderId, name)
+    const recent = this.recentSenders.get(event.chatId)
+    if (recent !== undefined && recent.senderId === event.senderId) recent.senderName = name
+    return `${name}(${event.senderId})`
   }
 
   /** Recent senders per chat, for filling `approveUsers` with the right ids. */
@@ -1975,6 +1995,7 @@ export class FeishuBot {
 
   async promptAndCollect(sessionId: string, text: string, event: FeishuEvent): Promise<string> {
     const groupName = await this.chatName(event.chatId)
+    const asker = event.senderId === '' ? 'unknown' : await this.senderLabel(event)
     return new Promise<string>((resolve, reject) => {
       const pending: PendingTurn = {
         chatId: event.chatId,
@@ -2006,8 +2027,8 @@ export class FeishuBot {
       const peerNames = peers.map(id => this.botNames.get(id) ?? id)
       const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peerNames.join('、')}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}`
       const header = groupName === undefined || groupName === ''
-        ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
-        : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${event.senderId || 'unknown'}]\n${text}`
+        ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${asker}]\n${text}`
+        : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${asker}]\n${text}`
       this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId,
