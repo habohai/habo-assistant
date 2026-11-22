@@ -429,19 +429,26 @@ export class LarkCli {
    * Runs one cheap bot call so a missing scope is reported at startup instead of
    * surfacing later as "the bot ignored my approval".
    */
-  async probeMemberScope(chatId: string): Promise<boolean> {
-    try {
-      await this.run([
-        'im', '+chat-members-list',
-        '--chat-id', chatId,
-        '--as', 'bot',
-        '--page-size', '1',
-        '--json',
-      ])
-      return true
-    } catch {
-      return false
+  async probeMemberScope(chatId: string): Promise<{ ok: boolean; identity?: 'bot' | 'user' }> {
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+chat-members-list',
+          '--chat-id', chatId,
+          '--as', identity,
+          '--page-size', '1',
+          '--json',
+        ])
+        // lark-cli exits 0 for API-level failures, so the payload decides.
+        const parsed = parseCliJson(stdout) as { ok?: unknown }
+        if (parsed.ok === false) continue
+        return { ok: true, identity }
+      } catch {
+        // Try the next identity: a bot without member scope may still have a
+        // signed-in user token, which is the normal case for this deployment.
+      }
     }
+    return { ok: false }
   }
 
   /** Union ids of the users in a group (stable across bot apps). */

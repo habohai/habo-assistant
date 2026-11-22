@@ -108,3 +108,33 @@ test('missing app scopes are recorded from real failures', async () => {
   assert.ok(scopes.includes('im:chat.members:read'))
   assert.ok(cli.scopeReport().every(entry => entry.command.startsWith('im +chat-members-list')))
 })
+
+test('member listing falls back from bot to user identity before failing', async () => {
+  const calls = []
+  const responses = [
+    { ok: false, error: { code: 99991672, message: 'has not applied for the required scope(s): im:chat.members:read' } },
+    { ok: true, data: { users: [] } },
+  ]
+  const ctx = {
+    logger: { info() {}, warn() {}, debug() {}, error() {} },
+    subprocess: {
+      async resolveExecutable() { return 'lark-cli' },
+      spawn(request) {
+        calls.push(request.argv.join(' '))
+        const payload = JSON.stringify(responses[Math.min(calls.length - 1, responses.length - 1)])
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: payload }) },
+            stderr: { readFrom: () => ({ text: '' }) },
+          },
+          terminate() {},
+        }
+      },
+    },
+  }
+  const cli = new LarkCli(ctx, { cwd: '/tmp' })
+  const probe = await cli.probeMemberScope('oc_1')
+  assert.deepEqual(probe, { ok: true, identity: 'user' })
+  assert.equal(calls.length, 2, 'bot identity is tried first, then user')
+})

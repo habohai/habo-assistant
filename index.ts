@@ -623,13 +623,17 @@ export class FeishuBot {
   async probeCapabilities(): Promise<void> {
     const chatId = this.registry.entries()[0]?.[1]?.chatId
     if (chatId === undefined) return
-    const ok = await this.cli.probeMemberScope(chatId)
-    if (ok) return
+    const probe = await this.cli.probeMemberScope(chatId)
+    if (probe.ok) {
+      this.ctx.logger.info(`feishu-bot: member listing available as ${String(probe.identity)} for "${this.config.botName}"`)
+      return
+    }
     const scopes = this.cli.scopeReport().map(entry => entry.scope)
     this.ctx.logger.warn(
-      `feishu-bot: bot "${this.config.botName}" cannot read group members`
+      `feishu-bot: bot "${this.config.botName}" cannot read group members with either identity`
       + `${scopes.length === 0 ? '' : ` (missing: ${scopes.join(', ')})`}`
-      + '; approval may not recognise you in this app',
+      + '; owner verification falls back to approveUsers. '
+      + `If this bot needs it, run: lark-cli --profile ${this.config.larkProfile ?? '<profile>'} auth login`,
     )
   }
 
