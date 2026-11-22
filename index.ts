@@ -525,6 +525,9 @@ export class FeishuBot {
       this.metrics.inc('deduped')
       return
     }
+    // Learn who addresses this bot before any filtering: this is the only way to
+    // discover the app-scoped open_id needed for `approveUsers`.
+    this.rememberSender(event)
     const text = cleanMessageText(event.content, event.mentions, this.config.botOpenId)
     if (isStopCommand(text) && this.canControl(event.chatId)) {
       this.stopChat(event)
@@ -561,7 +564,6 @@ export class FeishuBot {
         this.ctx.logger.warn(`feishu-bot: cannot remember p2p chat ${event.chatId}: ${String(error)}`)
       })
     }
-    this.rememberSender(event)
     if (text === '') {
       this.metrics.inc('emptyQuestion')
       this.fireReply(event, '请描述你的问题。')
