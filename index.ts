@@ -1163,17 +1163,6 @@ export class FeishuBot {
     return this.subagents.current
   }
 
-  /** Whether the built-in delegation backend is registered, for diagnostics. */
-  taskBackendStatus(): { provider: string; registered: boolean } {
-    const seam = this.subagentSeam()
-    if (seam === undefined || typeof seam.getProvider !== 'function') return { provider: 'spawn', registered: false }
-    try {
-      return { provider: 'spawn', registered: seam.getProvider('spawn') !== undefined }
-    } catch {
-      return { provider: 'spawn', registered: false }
-    }
-  }
-
   async ownerSession(sessionId: string): Promise<string | undefined> {
     if (this.botSessions.has(sessionId)) return sessionId
     if (this.sessionContexts.has(sessionId)) return sessionId
@@ -1398,7 +1387,6 @@ export class FeishuBot {
       bindings: this.registry.entries().length,
       dynamicChats: this.chats.size,
       trusted: this.requestTrust.size,
-      taskBackend: this.taskBackendStatus(),
       memberListing: this.capabilities().memberListing,
       missingScopes: this.blockingScopes(),
       permissionPreset: this.config.permissionPreset,
