@@ -307,7 +307,8 @@ test('dangerous commands ask the owner by default', () => {
 })
 
 test('the DSH answerer can approve without waiting for the group', async () => {
-  const { bot, stateDir } = await createBot({ approveUsers: ['ou_1'] })
+  // Explicit opt-out of the group channel keeps DSH as the answerer.
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_1'], approvalChannel: 'dsh' })
   try {
     bot.trackSession('ses_1', 'oc_1')
     const outcome = await bot.answerApproval(
@@ -464,6 +465,30 @@ test('each approval uses its own send idempotency key', async () => {
       .filter(key => key !== undefined)
     assert.ok(keys.length >= 2, `expected at least two sends, got ${keys.length}`)
     assert.equal(new Set(keys).size, keys.length, `idempotency keys collided: ${keys.join(', ')}`)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a bot-session approval goes to the chat group by default', async () => {
+  const { bot, stateDir, spawned } = await createBot({ approveUsers: ['ou_1'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    const pending = bot.answerApproval(
+      { agent: { session: { id: 'ses_1' } }, reason: '操作审批：ls', signal: new AbortController().signal },
+      () => Promise.resolve('allowed-once'),
+    )
+    await waitFor(() => bot.approvals.has('oc_1'))
+    await waitFor(() => spawned.some(request => request.argv.includes('+messages-send')))
+    // The card is what the group sees; the DSH answerer is not consulted.
+    const sent = spawned.filter(request => request.argv.includes('+messages-send'))
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].argv[sent[0].argv.indexOf('--msg-type') + 1], 'interactive')
+    assert.equal(bot.metrics.snapshot().counts.approvalFeishu, 1)
+    assert.equal(bot.metrics.snapshot().counts.approvalDsh, undefined)
+    bot.settleApproval('oc_1', 'cancelled')
+    assert.equal(await pending, 'cancelled')
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })

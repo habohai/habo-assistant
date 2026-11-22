@@ -52,6 +52,8 @@ export interface Config {
   taskSubagentProvider: string
   /** Send approvals as interactive cards with buttons. */
   approvalCards: boolean
+  /** Where a bot-session approval is asked: the chat group (default) or DSH. */
+  approvalChannel: 'feishu' | 'dsh'
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -140,6 +142,7 @@ export function normalizeConfig(raw: unknown): Config {
     // the package name `subagent-spawn-in-process` is NOT a registered backend.
     taskSubagentProvider: string('taskSubagentProvider', 'spawn'),
     approvalCards: value.approvalCards !== false,
+    approvalChannel: value.approvalChannel === 'dsh' ? 'dsh' : 'feishu',
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
     replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),

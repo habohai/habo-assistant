@@ -663,10 +663,14 @@ export class FeishuBot {
     const pendingChat = this.pending.get(sessionId)?.chatId
     const chatId = pendingChat ?? this.sessionChats.get(sessionId)?.values().next().value
     if (chatId === undefined) return next()
-    // Fail closed without an authorized group approver: only the DSH-side
-    // answerer may decide, and if nobody is there the tool is denied.
-    // DSH owns approval whenever it has an answerer. The group is only a
-    // fallback for an unattended bot session with no DSH approval UI open.
+    // A bot session is driven from a chat group, so the group is the natural
+    // approval channel: the people who asked are the people who approve. The
+    // DSH-side answerer is only consulted when configured or when no group
+    // approver exists.
+    if (this.config.approvalChannel === 'feishu' && this.config.approveUsers.length > 0) {
+      this.metrics.inc('approvalFeishu')
+      return this.askFeishuApproval({ chatId, sessionId, request })
+    }
     let dsh: ApprovalOutcome = 'unavailable'
     try {
       dsh = await next()

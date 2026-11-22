@@ -202,6 +202,7 @@ bots:
 | `taskSubagentTtlMs` | 30 分钟 | 任务摘要可复用的时长 |
 | `taskSubagentProvider` | `spawn` | 委派使用的 subagent 后端名 |
 | `approvalCards` | `true` | 审批是否使用互动卡片 |
+| `approvalChannel` | `feishu` | 审批渠道：`feishu`（发群里）或 `dsh`（交给桌面端） |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
 
 ## 回复格式
@@ -242,6 +243,7 @@ bots:
 
 ## 审批
 
+- **默认审批渠道是群**：机器人会话的审批发到群里，不依赖桌面端审批弹窗；
 - 默认发送互动卡片：`同意` / `拒绝` 两个按钮，点击即结算审批；
 - 卡片按钮回调通过第二条 `lark-cli event consume card.action.trigger` 长连接接收；
 - 只有 `approveUsers` 中的用户点击才生效，其他人点击被忽略并记日志；
