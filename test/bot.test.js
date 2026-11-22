@@ -675,3 +675,19 @@ test('delegation stays off unless enabled', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('delegation follows the configured pressure and turn thresholds', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true, taskSubagentContextThreshold: 10000, taskSubagentTurnThreshold: 50 })
+  try {
+    bot.ctx.subagents = { async startActivation() { throw new Error('unused') } }
+    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 500 } } })
+    assert.equal(await bot.shouldDelegate('ses_1'), false)
+    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 20000 } } })
+    assert.equal(await bot.shouldDelegate('ses_1'), true)
+    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 90 }, contextPressure: { surfaceTokens: 500 } } })
+    assert.equal(await bot.shouldDelegate('ses_1'), true)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

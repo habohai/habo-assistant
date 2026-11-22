@@ -1109,12 +1109,32 @@ export class FeishuBot {
   async shouldDelegate(sessionId: string): Promise<boolean> {
     if (!this.config.taskSubagentEnabled) return false
     if (this.ctx.subagents === undefined) return false
-    const digest = await this.sessionDigest(sessionId).catch(() => undefined)
-    if (digest === undefined) return false
-    const pressure = digest.large === true
-    if (pressure) return true
-    const stats = this.digestCache.get(sessionId)
-    return stats !== undefined && stats.large === true
+    const pressure = await this.sessionPressure(sessionId)
+    if (pressure === undefined) return false
+    return pressure.surfaceTokens > this.config.taskSubagentContextThreshold
+      || pressure.turns > this.config.taskSubagentTurnThreshold
+  }
+
+  /** Context pressure and turn count of one Session, read from its projections. */
+  async sessionPressure(sessionId: string): Promise<{ surfaceTokens: number; turns: number } | undefined> {
+    const read = this.ctx.sessionController.projections
+    if (typeof read !== 'function') return undefined
+    try {
+      const result = await read.call(this.ctx.sessionController, { sessionId }, new AbortController().signal) as
+        | { values?: Record<string, unknown> }
+        | null
+      const values = result?.values
+      if (values === undefined) return undefined
+      const stats = values.sessionStats as { turns?: unknown } | undefined
+      const contextPressure = values.contextPressure as { surfaceTokens?: unknown } | undefined
+      return {
+        surfaceTokens: typeof contextPressure?.surfaceTokens === 'number' ? contextPressure.surfaceTokens : 0,
+        turns: typeof stats?.turns === 'number' ? stats.turns : 0,
+      }
+    } catch (error) {
+      this.ctx.logger.debug(`feishu-bot: cannot read session pressure for ${sessionId}: ${String(error)}`)
+      return undefined
+    }
   }
 
   /**

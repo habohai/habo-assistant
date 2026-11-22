@@ -447,6 +447,11 @@ export class LarkCli {
       this.logger?.info(`feishu-bot[dry-run]: create doc ${title}`)
       return undefined
     }
+    // The CLI takes the body as an argv value; keep it well under the platform
+    // argument limit and let the caller fall back to a message instead.
+    if (typeof markdown !== 'string' || markdown.length > 100_000) {
+      throw new Error('document body is too large for one CLI argument')
+    }
     let lastError: unknown
     for (const identity of ['bot', 'user'] as const) {
       if (this.docDenied.has(identity)) continue

@@ -35,6 +35,10 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 | 发消息认领 | 从 Session 发往群/话题后，该 Conversation 自动绑定到当前 Session |
 | 发送前校验 | `lark-cli` 群发/话题回复先校验 owner 和 bot，再认领；未授权直接拒绝 |
 | 话题选择 | 绑定弹窗选中群后，可直接选群主会话或该群的已有话题 |
+| 回复格式 | 自动在纯文本 / 富文本 post 之间选择，Markdown 不再裸露 |
+| 长文与表格 | 超过阈值或含表格时转飞书文档，群里只发摘要和链接 |
+| 确认反馈 | `ackReaction: auto` 在 OnIt / Eyes / Typing 之间按消息稳定轮换 |
+| 长任务委派 | 上下文过长时把任务交给 task subagent，主 Session 不再继续膨胀 |
 | 命令审批 | 群里回复「同意 / 拒绝」即可处理审批，审批提示和结果留在原话题 |
 | 会话信息 | 当前 Session 绑定的群/话题、bot 列表、行内解绑、会话产物 |
 | 实时刷新 | 绑定或连接变化通过 SSE 推送，页面不需要手动刷新，也不轮询 |
@@ -191,7 +195,41 @@ bots:
 | `replyGuidelines` | 中文简洁 | 回复风格 |
 | `p2pSessionTtlMs` | 30 天 | 私聊 Session 有效期 |
 | `chatListTtlMs` | 5 分钟 | 群名 / 群列表缓存 |
+| `ackReaction` | `auto` | `auto` 按消息稳定轮换确认表情；`none` 关闭；也可写死 emoji |
+| `docsEnabled` | `true` | 长文 / 表格是否转飞书文档 |
+| `docThresholdChars` | 4000 | 超过该字数转文档 |
+| `docThresholdLines` | 60 | 超过该行数转文档 |
+| `taskSubagentEnabled` | `false` | 是否把长任务委派给 subagent |
+| `taskSubagentContextThreshold` | 120000 | 上下文 token 超过该值才委派 |
+| `taskSubagentTurnThreshold` | 80 | 轮次超过该值才委派 |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
+
+## 回复格式
+
+回复统一经过一层格式决策，业务代码只产出 Markdown：
+
+| 内容 | 发送方式 |
+| --- | --- |
+| 纯文本 | `text` |
+| 含加粗 / 列表 / 代码 / 链接 | `post` 富文本 |
+| Markdown 表格 | 飞书文档 + 摘要链接 |
+| 超过 `docThresholdChars` / `docThresholdLines` | 飞书文档 + 摘要链接 |
+| 文档创建失败 | 回落 `post`，再回落 `text` |
+
+- 表格识别要求表头 + 分隔行，日志里的 `a|b` 不会误判；
+- 文档先用 bot 身份创建，缺 `docx:document:create` 权限时自动改用 user 身份；
+- 两种身份都缺权限时记住该状态，后续不再重试，直接回落消息；
+- 文档标题为「群名 · yyyy-mm-dd hh:mm」。
+
+## 长任务委派
+
+`taskSubagentEnabled: true` 时，若主 Session 的上下文 token 或轮次超过阈值，这一轮任务交给 task subagent 执行：
+
+- 群 / 话题仍然只绑定主 Session；
+- subagent 只拿到本轮问题，不复制主 Session 历史；
+- 结果回到原群 / 话题，主 Session 不再被长任务撑大；
+- 委派失败时自动回落到主 Session 执行；
+- 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭。
 
 ## 安全模型
 
