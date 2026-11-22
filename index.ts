@@ -623,9 +623,13 @@ export class FeishuBot {
    * members, the only symptom would otherwise be "the bot ignored me".
    */
   async probeCapabilities(): Promise<void> {
-    const chatId = this.registry.entries()[0]?.[1]?.chatId
-    if (chatId === undefined) return
-    const probe = await this.cli.probeMemberScope(chatId)
+    // Member listing only exists for groups: a p2p chat has no member list, and
+    // probing one would report the bot as broken when it is not.
+    const group = this.registry.entries()
+      .map(([, record]) => record.chatId)
+      .find(id => this.chats.kind(id) !== 'p2p')
+    if (group === undefined) return
+    const probe = await this.cli.probeMemberScope(group)
     this.memberListing = probe.ok ? (probe.identity ?? 'none') : 'none'
     if (probe.ok) {
       this.ctx.logger.info(`feishu-bot: member listing available as ${String(probe.identity)} for "${this.config.botName}"`)
