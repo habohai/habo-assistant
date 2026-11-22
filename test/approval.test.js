@@ -587,3 +587,62 @@ test('the owner and the off switch are not gated', async () => {
     await rm(off.stateDir, { recursive: true, force: true })
   }
 })
+
+test('one approval covers the next requests in the same chat', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], requestApproval: 'all' })
+  try {
+    const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_t1', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '第一件事' }
+    assert.equal(bot.needsRequestApproval(event), true)
+    const gated = bot.gateRequest(event, '第一件事')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.settleApproval('oc_1', 'allowed-once')
+    await gated
+    // The same person may keep working without another prompt.
+    assert.equal(bot.needsRequestApproval({ ...event, messageId: 'om_t2', content: '第二件事' }), false)
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), true)
+    // Trust is scoped to the chat and to the person.
+    assert.equal(bot.isTrusted('oc_2', 'ou_guest'), false)
+    assert.equal(bot.needsRequestApproval({ ...event, senderId: 'ou_other', messageId: 'om_t3' }), true)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a rejected request grants no trust, and trust expires', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], requestApproval: 'all' })
+  try {
+    const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_r1', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '做点事' }
+    const denied = bot.gateRequest(event, '做点事')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.settleApproval('oc_1', 'rejected')
+    await denied
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), false)
+
+    bot.grantTrust('oc_1', 'ou_guest')
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), true)
+    // Simulate the TTL elapsing rather than sleeping for the configured window.
+    bot.requestTrust.set('oc_1::ou_guest', Date.now() - 1)
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), false, 'trust must expire')
+    assert.equal(bot.needsRequestApproval(event), true)
+    await new Promise(resolve => setTimeout(resolve, 30))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('trust can be switched off', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], requestTrustMs: 0 })
+  try {
+    bot.grantTrust('oc_1', 'ou_guest')
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), false)
+    const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_x', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '再来' }
+    assert.equal(bot.needsRequestApproval(event), true)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

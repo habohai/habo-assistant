@@ -69,6 +69,13 @@ export interface Config {
    * for the owner's own messages.
    */
   requestApproval: 'off' | 'non-owner' | 'all'
+  /**
+   * How long one approval keeps working for the same person in the same chat.
+   *
+   * Without it every single message needs a decision; with it a normal working
+   * session asks once. 0 disables trust entirely.
+   */
+  requestTrustMs: number
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -161,6 +168,10 @@ export function normalizeConfig(raw: unknown): Config {
     requestApproval: value.requestApproval === 'off' || value.requestApproval === 'all'
       ? value.requestApproval
       : 'non-owner',
+    // 0 is a meaningful value here (trust disabled), so it bypasses integer().
+    requestTrustMs: value.requestTrustMs === 0
+      ? 0
+      : integer('requestTrustMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
     replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),

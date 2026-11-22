@@ -190,6 +190,8 @@ export class FeishuBot {
   private readonly activations: Map<string, SubagentActivationLike>
   /** Conversations the user stopped while a delegated task was in flight. */
   private readonly cancelledTasks: Set<string>
+  /** `${chatId}::${senderId}` -> trust expiry after one approval. */
+  private readonly requestTrust: Map<string, number>
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
@@ -245,6 +247,7 @@ export class FeishuBot {
     this.tasks = new Map()
     this.activations = new Map()
     this.cancelledTasks = new Set()
+    this.requestTrust = new Map()
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -576,8 +579,37 @@ export class FeishuBot {
     if (policy === 'off') return false
     if (this.config.approveUsers.length === 0) return false
     if (event.senderType !== 'user') return false
-    if (policy === 'all') return true
-    return !this.config.approveUsers.includes(event.senderId)
+    if (policy === 'non-owner' && this.config.approveUsers.includes(event.senderId)) return false
+    // One approval covers a working session, not a single message.
+    return !this.isTrusted(event.chatId, event.senderId)
+  }
+
+  /** Whether this person may drive the bot in this chat without asking again. */
+  isTrusted(chatId: string, senderId: string): boolean {
+    const key = `${chatId}::${senderId}`
+    const until = this.requestTrust.get(key)
+    if (until === undefined) return false
+    if (Date.now() >= until) {
+      this.requestTrust.delete(key)
+      return false
+    }
+    return true
+  }
+
+  /** Remember one approval for `requestTrustMs`; a no-op when it is disabled. */
+  grantTrust(chatId: string, senderId: string): void {
+    if (this.config.requestTrustMs <= 0 || senderId === '') return
+    this.pruneTrust()
+    this.requestTrust.set(`${chatId}::${senderId}`, Date.now() + this.config.requestTrustMs)
+    this.metrics.inc('trustGranted')
+  }
+
+  /** Drop expired entries so a busy bot does not accumulate them. */
+  private pruneTrust(): void {
+    const now = Date.now()
+    for (const [key, until] of this.requestTrust) {
+      if (now >= until) this.requestTrust.delete(key)
+    }
   }
 
   /**
@@ -622,6 +654,7 @@ export class FeishuBot {
       return
     }
     this.metrics.inc('requestAllowed')
+    this.grantTrust(event.chatId, event.senderId)
     if (!this.queue.push(key, { event, text, enqueuedAt: Date.now() })) {
       this.metrics.inc('queueRejected')
       this.fireReply(event, '当前排队较多，请稍后再试。')
@@ -1062,6 +1095,7 @@ export class FeishuBot {
       bindings: this.registry.entries().length,
       dynamicChats: this.chats.size,
       tasks: this.tasks.size,
+      trusted: this.requestTrust.size,
       taskBackend: this.taskBackendStatus(),
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
