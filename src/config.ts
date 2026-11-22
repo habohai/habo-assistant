@@ -134,7 +134,8 @@ export function normalizeConfig(raw: unknown): Config {
     progress: value.progress !== false,
     /** Emoji reacted onto the question while it is queued; '' disables. */
     ackReaction: normalizeAckReaction(string('ackReaction', 'auto')),
-    docsEnabled: value.docsEnabled !== false,
+    // Opt-in: replies stay in the chat unless a document is explicitly wanted.
+    docsEnabled: value.docsEnabled === true,
     docThresholdChars: integer('docThresholdChars', 4000, 200, 200_000),
     docThresholdLines: integer('docThresholdLines', 60, 5, 5000),
     taskSubagentEnabled: value.taskSubagentEnabled === true,

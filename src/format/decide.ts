@@ -30,14 +30,21 @@ export interface ReplyPolicy {
   docThresholdChars: number
   /** Line count above which a reply becomes a document; 0 disables. */
   docThresholdLines: number
-  /** Whether tables may be routed to a document. */
+  /**
+   * Whether long/table content may become a document on its own.
+   *
+   * Off by default: a document is a deliberate deliverable, not a side effect of
+   * formatting. Replies stay in the chat unless someone asks for a document.
+   */
   docsEnabled: boolean
+  /** Explicit request for a document, regardless of length or tables. */
+  forceDoc?: boolean
 }
 
 export const DEFAULT_REPLY_POLICY: ReplyPolicy = {
   docThresholdChars: 4000,
   docThresholdLines: 60,
-  docsEnabled: true,
+  docsEnabled: false,
 }
 
 const MARKERS: Array<{ name: string; pattern: RegExp }> = [
@@ -90,6 +97,7 @@ export function decideReply(text: string, policy: ReplyPolicy = DEFAULT_REPLY_PO
   if (content.trim() === '') return { kind: 'text', reason: 'empty', content, markers: [], table: false }
   const markers = markdownMarkers(content)
   const table = hasMarkdownTable(content)
+  if (policy.forceDoc === true) return { kind: 'doc', reason: 'long', content, markers, table }
   if (policy.docsEnabled) {
     if (table) return { kind: 'doc', reason: 'table', content, markers, table }
     const chars = content.length
@@ -98,7 +106,9 @@ export function decideReply(text: string, policy: ReplyPolicy = DEFAULT_REPLY_PO
       || (policy.docThresholdLines > 0 && lines > policy.docThresholdLines)
     if (tooLong) return { kind: 'doc', reason: 'long', content, markers, table }
   }
-  if (markers.length === 0) return { kind: 'text', reason: 'plain', content, markers, table }
+  // A table has no post rendering either, but plain text collapses its columns;
+  // rich text at least keeps the rows apart.
+  if (markers.length === 0 && !table) return { kind: 'text', reason: 'plain', content, markers, table }
   return { kind: 'post', reason: 'markdown', content, markers, table }
 }
 

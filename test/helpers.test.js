@@ -20,7 +20,7 @@ test('normalizeConfig applies safe defaults', () => {
   assert.equal(config.routing, 'chat')
   assert.equal(config.replyInThread, true)
   assert.equal(config.ackReaction, 'auto')
-  assert.equal(config.docsEnabled, true)
+  assert.equal(config.docsEnabled, false)
   assert.equal(config.docThresholdChars, 4000)
   assert.equal(config.docThresholdLines, 60)
   assert.equal(config.timeoutMs, 600000)

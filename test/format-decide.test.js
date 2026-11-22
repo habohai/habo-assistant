@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { decideReply, docSummary, hasMarkdownTable, markdownMarkers } from '../lib/index.js'
+import { DEFAULT_REPLY_POLICY, decideReply, docSummary, hasMarkdownTable, markdownMarkers } from '../lib/index.js'
 
 test('decideReply keeps plain text on the text transport', () => {
   const plan = decideReply('构建成功了。')
@@ -50,21 +50,28 @@ test('hasMarkdownTable requires a delimiter row', () => {
   assert.equal(hasMarkdownTable('执行命令：\nfoo | bar'), false)
 })
 
-test('decideReply sends tables to documents', () => {
+test('decideReply keeps tables in the chat by default', () => {
   const plan = decideReply('| 任务 | 状态 |\n|---|---|\n| 构建 | 通过 |')
-  assert.equal(plan.kind, 'doc')
-  assert.equal(plan.reason, 'table')
+  assert.equal(plan.kind, 'post')
   assert.equal(plan.table, true)
 })
 
-test('decideReply sends long replies to documents', () => {
+test('decideReply keeps long plain replies on the text transport', () => {
   const long = Array.from({ length: 80 }, () => '这一行是报告内容').join('\n')
-  const plan = decideReply(long)
-  assert.equal(plan.kind, 'doc')
-  assert.equal(plan.reason, 'long')
+  // Length alone never creates a document; without Markdown it stays cheap text.
+  assert.equal(decideReply(long).kind, 'text')
+  const markdown = Array.from({ length: 80 }, () => '- 这一行是报告要点').join('\n')
+  assert.equal(decideReply(markdown).kind, 'post')
 })
 
-test('decideReply respects doc thresholds and the docs switch', () => {
+test('a document needs an explicit request', () => {
+  const table = '| 任务 | 状态 |\n|---|---|\n| 构建 | 通过 |'
+  assert.equal(decideReply(table, { ...DEFAULT_REPLY_POLICY, forceDoc: true }).kind, 'doc')
+  assert.equal(decideReply('普通一句话', { ...DEFAULT_REPLY_POLICY, forceDoc: true }).kind, 'doc')
+  assert.equal(decideReply(table, { ...DEFAULT_REPLY_POLICY, docsEnabled: true }).reason, 'table')
+})
+
+test('auto document routing needs the explicit switch', () => {
   const long = 'x'.repeat(5000)
   assert.equal(decideReply(long, { docsEnabled: false, docThresholdChars: 100, docThresholdLines: 0 }).kind, 'text')
   assert.equal(decideReply(long, { docsEnabled: true, docThresholdChars: 9999, docThresholdLines: 0 }).kind, 'text')

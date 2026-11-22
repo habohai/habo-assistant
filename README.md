@@ -197,7 +197,7 @@ bots:
 | `p2pSessionTtlMs` | 30 天 | 私聊 Session 有效期 |
 | `chatListTtlMs` | 5 分钟 | 群名 / 群列表缓存 |
 | `ackReaction` | `auto` | `auto` 按消息稳定轮换确认表情；`none` 关闭；也可写死 emoji |
-| `docsEnabled` | `true` | 长文 / 表格是否转飞书文档 |
+| `docsEnabled` | `false` | 是否允许表格 / 长文自动转文档（默认关闭） |
 | `docThresholdChars` | 4000 | 超过该字数转文档 |
 | `docThresholdLines` | 60 | 超过该行数转文档 |
 | `taskSubagentEnabled` | `false` | 是否把长任务委派给 subagent |
@@ -215,10 +215,13 @@ bots:
 | --- | --- |
 | 纯文本 | `text` |
 | 含加粗 / 列表 / 代码 / 链接 | `post` 富文本 |
-| Markdown 表格 | 飞书文档 + 摘要链接 |
-| 超过 `docThresholdChars` / `docThresholdLines` | 飞书文档 + 摘要链接 |
+| Markdown 表格 | `post` 富文本（不自动建文档） |
+| 超长内容 | 按 `maxReplyChars` 分段 `post`，始终留在聊天里 |
+| 显式要求发送文档 | 飞书文档 + 摘要链接 |
 | 文档创建失败 | 回落 `post`，再回落 `text` |
 
+- 默认**不会**因为表格或长度自动创建文档，避免产生一堆需要清理的文档；
+- 只有显式要求（`docsEnabled: true` 或调用方 `forceDoc`）才建文档；
 - 表格识别要求表头 + 分隔行，日志里的 `a|b` 不会误判；
 - 文档先用 bot 身份创建，缺 `docx:document:create` 权限时自动改用 user 身份；
 - 两种身份都缺权限时记住该状态，后续不再重试，直接回落消息；
