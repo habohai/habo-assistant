@@ -107,6 +107,16 @@ interface PendingTurn {
   timer?: NodeJS.Timeout
 }
 
+/** What one delegated turn produced, so the caller never re-runs silently. */
+type DelegateOutcome =
+  | { status: 'answered'; answer: string }
+  /** The user stopped this task; nothing else may run for it. */
+  | { status: 'cancelled' }
+  /** The child ran and failed; re-running would duplicate side effects. */
+  | { status: 'failed' }
+  /** No child was ever created; the caller may use the main Session. */
+  | { status: 'unavailable' }
+
 interface FeishuTaskState {
   taskId: string
   childId: string
@@ -177,6 +187,8 @@ export class FeishuBot {
   private readonly tasks: Map<string, FeishuTaskState>
   /** conversationKey -> live subagent activation, so stop can cancel it. */
   private readonly activations: Map<string, SubagentActivationLike>
+  /** Conversations the user stopped while a delegated task was in flight. */
+  private readonly cancelledTasks: Set<string>
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
@@ -231,6 +243,7 @@ export class FeishuBot {
     this.digestCache = new Map()
     this.tasks = new Map()
     this.activations = new Map()
+    this.cancelledTasks = new Set()
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -1130,7 +1143,8 @@ export class FeishuBot {
     const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     const sessionId = this.registry.get(key)?.sessionId
     let stopped = false
-    if (this.activations.has(key)) {
+    if (this.activations.has(key) || this.tasks.get(key)?.status === 'running') {
+      this.cancelledTasks.add(key)
       void this.cancelTask(key)
       stopped = true
     }
@@ -1195,9 +1209,26 @@ export class FeishuBot {
     }
     let answer
     try {
-      const delegated = await this.shouldDelegate(sessionId)
-      const delegatedAnswer = delegated ? await this.runInSubagent(key, sessionId, text) : undefined
-      answer = delegatedAnswer ?? await this.promptAndCollect(sessionId, text, event)
+      // A delegated turn reports what happened. Only "no child was created" may
+      // fall back to the main Session; cancelled and failed turns must not run
+      // again, or a stop would execute the same command twice.
+      let delegatedOutcome: DelegateOutcome | undefined
+      if (await this.shouldDelegate(sessionId)) {
+        delegatedOutcome = await this.runInSubagent(key, sessionId, text)
+        if (delegatedOutcome.status === 'cancelled') {
+          this.metrics.inc('jobsCancelled')
+          this.ctx.logger.info(`feishu-bot: delegated task cancelled chat=${event.chatId}`)
+          return
+        }
+        if (delegatedOutcome.status === 'failed') {
+          this.metrics.inc('jobsFailed')
+          await this.deliver(event, await placeholder$, ['任务执行失败，已中断。可以缩小范围后再问一次。'])
+          return
+        }
+      }
+      answer = delegatedOutcome?.status === 'answered'
+        ? delegatedOutcome.answer
+        : await this.promptAndCollect(sessionId, text, event)
     } catch (error) {
       if (this.stopping) return
       if ((error as { code?: string }).code === 'FEISHU_CANCELLED') {
@@ -1316,12 +1347,12 @@ export class FeishuBot {
    * assistant text is the answer. The activation is always disposed, so a failed
    * child cannot leak resources.
    */
-  async runInSubagent(conversationKey: string, sessionId: string, text: string): Promise<string | undefined> {
+  async runInSubagent(conversationKey: string, sessionId: string, text: string): Promise<DelegateOutcome> {
     const subagents = this.subagentSeam()
-    if (subagents === undefined) return undefined
+    if (subagents === undefined) return { status: 'unavailable' }
     const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
     const parent = (resolved as { agent?: unknown }).agent
-    if (parent === undefined || parent === null) return undefined
+    if (parent === undefined || parent === null) return { status: 'unavailable' }
     const previous = this.taskFor(conversationKey)
     const prompt = previous === undefined || previous.summary === ''
       ? text
@@ -1344,8 +1375,14 @@ export class FeishuBot {
         ...(maxDepth === undefined ? {} : { maxDepth }),
       })
       this.activations.set(conversationKey, activation)
+      this.recordTask(conversationKey, activation.childId, 'running', previous?.summary ?? '')
       this.metrics.inc('taskDelegated')
       const result = await activation.result
+      // A stop racing with the child's finish must win: the user already said no.
+      if (this.cancelledTasks.has(conversationKey)) {
+        this.cancelledTasks.delete(conversationKey)
+        return { status: 'cancelled' }
+      }
       const answer = (result.output ?? [])
         .map(block => (typeof block?.text === 'string' ? block.text : ''))
         .join('\n')
@@ -1354,15 +1391,20 @@ export class FeishuBot {
       if (answer === '') {
         this.ctx.logger.warn(`feishu-bot: task subagent returned no text (${String(result.stopReason)})`)
         this.recordTask(conversationKey, activation.childId, 'failed', previous?.summary ?? '')
-        return undefined
+        return { status: 'failed' }
       }
       this.recordTask(conversationKey, activation.childId, failed ? 'failed' : 'succeeded', answer.slice(0, 4000))
-      return answer
+      return failed ? { status: 'failed' } : { status: 'answered', answer }
     } catch (error) {
       this.metrics.inc('taskDelegateFailed')
       this.ctx.logger.warn(`feishu-bot: task subagent failed: ${String(error)}`)
-      this.recordTask(conversationKey, activation?.childId ?? '', 'failed', previous?.summary ?? '')
-      return undefined
+      if (this.cancelledTasks.has(conversationKey)) {
+        this.cancelledTasks.delete(conversationKey)
+        return { status: 'cancelled' }
+      }
+      if (activation === undefined) return { status: 'unavailable' }
+      this.recordTask(conversationKey, activation.childId, 'failed', previous?.summary ?? '')
+      return { status: 'failed' }
     } finally {
       clearTimeout(timer)
       this.activations.delete(conversationKey)
