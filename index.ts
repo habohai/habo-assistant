@@ -120,24 +120,6 @@ interface PendingTurn {
   timer?: NodeJS.Timeout
 }
 
-/** What one delegated turn produced, so the caller never re-runs silently. */
-type DelegateOutcome =
-  | { status: 'answered'; answer: string }
-  /** The user stopped this task; nothing else may run for it. */
-  | { status: 'cancelled' }
-  /** The child ran and failed; re-running would duplicate side effects. */
-  | { status: 'failed' }
-  /** No child was ever created; the caller may use the main Session. */
-  | { status: 'unavailable' }
-
-interface FeishuTaskState {
-  taskId: string
-  childId: string
-  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
-  summary: string
-  updatedAt: number
-}
-
 interface ApprovalRequest {
   agent?: { session?: { id?: string } }
   reason?: string
@@ -196,18 +178,8 @@ export class FeishuBot {
   private lastEventAt: number
   private readonly sessionLookup: Map<string, { at: number; sessionId?: string }>
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
-  /** conversationKey -> last delegated task, so a follow-up keeps its thread. */
   /** Optional seam holder; public so hosts and tests can inject a backend. */
   readonly subagents: SubagentSeam
-  private readonly tasks: Map<string, FeishuTaskState>
-  /** conversationKey -> live subagent activation, so stop can cancel it. */
-  private readonly activations: Map<string, SubagentActivationLike>
-  /** Conversations the user stopped while a delegated task was in flight. */
-  private readonly cancelledTasks: Set<string>
-  /** Delegated child session -> the bot session that owns the conversation. */
-  private readonly childOwners: Map<string, string>
-  /** Abort handles for running delegations, so a stop cannot hang on them. */
-  private readonly taskAborts: Map<string, AbortController>
   /** Per-chat chain: a second approval waits instead of failing closed. */
   private readonly approvalQueue: Map<string, Promise<void>>
   /** `${chatId}::${senderId}` -> trust expiry after one approval. */
@@ -277,13 +249,8 @@ export class FeishuBot {
     this.lastEventAt = 0
     this.sessionLookup = new Map()
     this.digestCache = new Map()
-    this.tasks = new Map()
-    this.activations = new Map()
-    this.cancelledTasks = new Set()
     this.requestTrust = new Map()
     this.approvalQueue = new Map()
-    this.childOwners = new Map()
-    this.taskAborts = new Map()
     this.recentSenders = new Map()
     this.senderNames = new Map()
     this.dangerPatterns = compileDenyPatterns(DEFAULT_DENY_PATTERNS)
@@ -1186,18 +1153,37 @@ export class FeishuBot {
    * A delegated child runs tools under its own session id, so a miss here is
    * resolved by walking to the subagent tree root instead of ignoring the call.
    */
+  /**
+   * The subagent seam, when the host exposes it.
+   *
+   * Read through the holder rather than `ctx.subagents`: Cordis throws on
+   * undeclared service access, so a missing service must not be probed directly.
+   */
+  subagentSeam(): SubagentsLike | undefined {
+    return this.subagents.current
+  }
+
+  /** Whether the built-in delegation backend is registered, for diagnostics. */
+  taskBackendStatus(): { provider: string; registered: boolean } {
+    const seam = this.subagentSeam()
+    if (seam === undefined || typeof seam.getProvider !== 'function') return { provider: 'spawn', registered: false }
+    try {
+      return { provider: 'spawn', registered: seam.getProvider('spawn') !== undefined }
+    } catch {
+      return { provider: 'spawn', registered: false }
+    }
+  }
+
   async ownerSession(sessionId: string): Promise<string | undefined> {
     if (this.botSessions.has(sessionId)) return sessionId
     if (this.sessionContexts.has(sessionId)) return sessionId
-    // A delegated child is the case that matters: its tool calls must be
-    // approved in the conversation that asked, not skipped.
-    const owner = this.childOwners.get(sessionId)
-    if (owner !== undefined) return owner
+    // A delegated child runs tools under its own session id; walk to the tree
+    // root so its actions are approved in the conversation that asked.
     const seam = this.subagentSeam()
     const rootOf = (seam as { rootOf?: (agent: unknown) => { session?: { id?: string } } } | undefined)?.rootOf
     if (typeof rootOf !== 'function') return undefined
-    const agents = this.ctx.get('agents') as { get?: (id: string) => unknown } | undefined
-    const agent = agents?.get?.(sessionId)
+    const resolved = await this.ctx.sessionController.resolveAgent(sessionId).catch(() => undefined)
+    const agent = (resolved as { agent?: unknown } | undefined)?.agent
     if (agent === undefined || agent === null) return undefined
     try {
       const root = rootOf.call(seam, agent)
@@ -1411,7 +1397,6 @@ export class FeishuBot {
       approvals: this.approvals.size,
       bindings: this.registry.entries().length,
       dynamicChats: this.chats.size,
-      tasks: this.tasks.size,
       trusted: this.requestTrust.size,
       taskBackend: this.taskBackendStatus(),
       memberListing: this.capabilities().memberListing,
@@ -1581,11 +1566,6 @@ export class FeishuBot {
     const key = bindingKey(event.chatId, routeThreadKey(event, this.routing), this.routing)
     const sessionId = this.registry.get(key)?.sessionId
     let stopped = false
-    if (this.activations.has(key) || this.tasks.get(key)?.status === 'running') {
-      this.cancelledTasks.add(key)
-      void this.cancelTask(key)
-      stopped = true
-    }
     if (this.approvals.has(event.chatId)) {
       this.settleApproval(event.chatId, 'cancelled')
       stopped = true
@@ -1647,26 +1627,7 @@ export class FeishuBot {
     }
     let answer
     try {
-      // A delegated turn reports what happened. Only "no child was created" may
-      // fall back to the main Session; cancelled and failed turns must not run
-      // again, or a stop would execute the same command twice.
-      let delegatedOutcome: DelegateOutcome | undefined
-      if (await this.shouldDelegate(sessionId)) {
-        delegatedOutcome = await this.runInSubagent(key, sessionId, text)
-        if (delegatedOutcome.status === 'cancelled') {
-          this.metrics.inc('jobsCancelled')
-          this.ctx.logger.info(`feishu-bot: delegated task cancelled chat=${event.chatId}`)
-          return
-        }
-        if (delegatedOutcome.status === 'failed') {
-          this.metrics.inc('jobsFailed')
-          await this.deliver(event, await placeholder$, ['任务执行失败，已中断。可以缩小范围后再问一次。'])
-          return
-        }
-      }
-      answer = delegatedOutcome?.status === 'answered'
-        ? delegatedOutcome.answer
-        : await this.promptAndCollect(sessionId, text, event)
+      answer = await this.promptAndCollect(sessionId, text, event)
     } catch (error) {
       if (this.stopping) return
       if ((error as { code?: string }).code === 'FEISHU_CANCELLED') {
@@ -1702,195 +1663,6 @@ export class FeishuBot {
     this.metrics.inc(delivered ? 'jobsSucceeded' : 'jobsFailed')
     this.metrics.observe('jobTotalMs', Date.now() - startedAt)
     this.ctx.logger.info(`feishu-bot: answered chat=${event.chatId} session=${sessionId} in ${Date.now() - startedAt}ms`)
-  }
-
-  /**
-   * Whether this task should run in a child agent instead of the main Session.
-   *
-   * Delegation is opt-in: it needs the subagent seam, a live parent Agent, and a
-   * Session whose context pressure or turn count passed the threshold. Anything
-   * else keeps the plain main-Session path, which is cheaper and keeps history.
-   */
-  async shouldDelegate(sessionId: string): Promise<boolean> {
-    if (!this.config.taskSubagentEnabled) return false
-    if (this.subagentSeam() === undefined) return false
-    const pressure = await this.sessionPressure(sessionId)
-    if (pressure === undefined) return false
-    return pressure.surfaceTokens > this.config.taskSubagentContextThreshold
-      || pressure.turns > this.config.taskSubagentTurnThreshold
-  }
-
-  /**
-   * The subagent seam, when the host exposes it.
-   *
-   * Read through the holder rather than `ctx.subagents`: Cordis throws on
-   * undeclared service access, so a missing service must not be probed directly.
-   */
-  subagentSeam(): SubagentsLike | undefined {
-    return this.subagents.current
-  }
-
-  /** Whether the configured delegation backend is actually registered. */
-  taskBackendStatus(): { configured: string; registered: boolean } {
-    const seam = this.subagentSeam()
-    const configured = this.config.taskSubagentProvider
-    if (seam === undefined) return { configured, registered: false }
-    if (typeof seam.getProvider !== 'function') return { configured, registered: false }
-    try {
-      return { configured, registered: seam.getProvider(configured) !== undefined }
-    } catch {
-      return { configured, registered: false }
-    }
-  }
-
-  /** Context pressure and turn count of one Session, read from its projections. */
-  async sessionPressure(sessionId: string): Promise<{ surfaceTokens: number; turns: number } | undefined> {
-    const read = this.ctx.sessionController.projections
-    if (typeof read !== 'function') return undefined
-    try {
-      // A hung projection read would silently disable delegation, so bound it.
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 5_000)
-      timer.unref?.()
-      const result = await Promise.race([
-        read.call(this.ctx.sessionController, { sessionId }, controller.signal),
-        new Promise<null>(resolve => {
-          setTimeout(() => resolve(null), 5_000).unref?.()
-        }),
-      ]).finally(() => { clearTimeout(timer) }) as { values?: Record<string, unknown> } | null
-      const values = result?.values
-      if (values === undefined) return undefined
-      const stats = values.sessionStats as { turns?: unknown } | undefined
-      const contextPressure = values.contextPressure as { surfaceTokens?: unknown } | undefined
-      return {
-        surfaceTokens: typeof contextPressure?.surfaceTokens === 'number' ? contextPressure.surfaceTokens : 0,
-        turns: typeof stats?.turns === 'number' ? stats.turns : 0,
-      }
-    } catch (error) {
-      this.ctx.logger.debug(`feishu-bot: cannot read session pressure for ${sessionId}: ${String(error)}`)
-      return undefined
-    }
-  }
-
-  /**
-   * Run one turn inside a child agent so the main Session keeps its context.
-   *
-   * The child receives only the question, never the main history; its final
-   * assistant text is the answer. The activation is always disposed, so a failed
-   * child cannot leak resources.
-   */
-  async runInSubagent(conversationKey: string, sessionId: string, text: string): Promise<DelegateOutcome> {
-    const subagents = this.subagentSeam()
-    if (subagents === undefined) return { status: 'unavailable' }
-    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
-    const parent = (resolved as { agent?: unknown }).agent
-    if (parent === undefined || parent === null) return { status: 'unavailable' }
-    const previous = this.taskFor(conversationKey)
-    const prompt = previous === undefined || previous.summary === ''
-      ? text
-      : `上一轮任务的结论摘要（供你继续这个任务参考）：\n${previous.summary}\n\n用户新的消息：\n${text}`
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), Math.max(this.config.timeoutMs, 60_000))
-    timer.unref?.()
-    let activation: SubagentActivationLike | undefined
-    try {
-      const maxDepth = typeof subagents.resolveMaxDepth === 'function'
-        ? subagents.resolveMaxDepth()
-        : undefined
-      activation = await subagents.startActivation({
-        provider: this.config.taskSubagentProvider,
-        parent,
-        prompt: [{ type: 'text', text: prompt }],
-        signal: controller.signal,
-        delivery: 'caller',
-        label: 'feishu-task',
-        // The child must run in the same place and with the same preset as the
-        // Session that owns the conversation, not whatever the default is.
-        ...(this.config.cwd === '' ? {} : { cwd: this.config.cwd }),
-        ...(this.config.agentPreset === undefined ? {} : { agentPreset: this.config.agentPreset }),
-        ...(maxDepth === undefined ? {} : { maxDepth }),
-      })
-      activation = await Promise.resolve(activation)
-      this.activations.set(conversationKey, activation)
-      this.taskAborts.set(conversationKey, controller)
-      this.childOwners.set(activation.childId, sessionId)
-      this.recordTask(conversationKey, activation.childId, 'running', previous?.summary ?? '')
-      this.metrics.inc('taskDelegated')
-      const result = await activation.result
-      // A stop racing with the child's finish must win: the user already said no.
-      if (this.cancelledTasks.has(conversationKey)) {
-        this.cancelledTasks.delete(conversationKey)
-        return { status: 'cancelled' }
-      }
-      const answer = (result.output ?? [])
-        .map(block => (typeof block?.text === 'string' ? block.text : ''))
-        .join('\n')
-        .trim()
-      const failed = result.stopReason !== undefined && result.stopReason !== 'completed'
-      if (answer === '') {
-        this.ctx.logger.warn(`feishu-bot: task subagent returned no text (${String(result.stopReason)})`)
-        this.recordTask(conversationKey, activation.childId, 'failed', previous?.summary ?? '')
-        return { status: 'failed' }
-      }
-      this.recordTask(conversationKey, activation.childId, failed ? 'failed' : 'succeeded', answer.slice(0, 4000))
-      return failed ? { status: 'failed' } : { status: 'answered', answer }
-    } catch (error) {
-      this.metrics.inc('taskDelegateFailed')
-      this.ctx.logger.warn(`feishu-bot: task subagent failed: ${String(error)}`)
-      if (this.cancelledTasks.has(conversationKey)) {
-        this.cancelledTasks.delete(conversationKey)
-        return { status: 'cancelled' }
-      }
-      if (activation === undefined) return { status: 'unavailable' }
-      this.recordTask(conversationKey, activation.childId, 'failed', previous?.summary ?? '')
-      return { status: 'failed' }
-    } finally {
-      clearTimeout(timer)
-      this.activations.delete(conversationKey)
-      this.taskAborts.delete(conversationKey)
-      if (activation !== undefined) await activation.dispose().catch(() => {})
-    }
-  }
-
-  /** Last task of one conversation, dropped once its idle TTL has elapsed. */
-  taskFor(conversationKey: string): FeishuTaskState | undefined {
-    const task = this.tasks.get(conversationKey)
-    if (task === undefined) return undefined
-    if (Date.now() - task.updatedAt > this.config.taskSubagentTtlMs) {
-      this.tasks.delete(conversationKey)
-      return undefined
-    }
-    return task
-  }
-
-  private recordTask(conversationKey: string, childId: string, status: FeishuTaskState['status'], summary: string): void {
-    this.tasks.set(conversationKey, {
-      taskId: `${conversationKey}:${Date.now()}`,
-      childId,
-      status,
-      summary,
-      updatedAt: Date.now(),
-    })
-  }
-
-  /** Cancel the delegated task of one conversation, if any. */
-  async cancelTask(conversationKey: string): Promise<boolean> {
-    const activation = this.activations.get(conversationKey)
-    if (activation === undefined) return false
-    const task = this.tasks.get(conversationKey)
-    this.tasks.set(conversationKey, {
-      taskId: task?.taskId ?? `${conversationKey}:${Date.now()}`,
-      childId: activation.childId,
-      status: 'cancelled',
-      summary: task?.summary ?? '',
-      updatedAt: Date.now(),
-    })
-    this.activations.delete(conversationKey)
-    this.taskAborts.get(conversationKey)?.abort()
-    this.taskAborts.delete(conversationKey)
-    await activation.dispose().catch(() => {})
-    this.metrics.inc('taskCancelled')
-    return true
   }
 
   /** Immediate acknowledgement: a reply the final answer later replaces. */
@@ -2266,7 +2038,8 @@ export class FeishuBot {
       this.pending.set(sessionId, pending)
       const peers = this.registry.peersForChat(event.chatId)
       const peerNames = peers.map(id => this.botNames.get(id) ?? id)
-      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peerNames.join('、')}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}`
+      const delegation = this.config.delegateGuidance === '' ? '' : ` | 委派指引:${this.config.delegateGuidance}`
+      const botTag = `机器人:${this.config.botName} | 机器人ID:${this.config.botId}${peers.length === 0 ? '' : ` | 群内已绑定机器人:${peerNames.join('、')}`}${this.config.replyGuidelines === '' ? '' : ` | 回复要求:${this.config.replyGuidelines}`}${delegation}`
       const header = groupName === undefined || groupName === ''
         ? `[飞书群:${event.chatId} | ${botTag} | 提问人:${asker}]\n${text}`
         : `[飞书群:${groupName} | 群ID:${event.chatId} | ${botTag} | 提问人:${asker}]\n${text}`

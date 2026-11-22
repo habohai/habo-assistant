@@ -121,7 +121,7 @@ test('an accepted message gets an immediate placeholder that becomes the answer'
     // The answer replaced the placeholder instead of adding another message.
     assert.equal(replies.length, 1)
 
-    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题。 | 提问人:ou_1]\n帮我看下构建为什么失败')
+    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题。 | 委派指引:需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:ou_1]\n帮我看下构建为什么失败')
     assert.equal(bot.metrics.snapshot().counts.jobsSucceeded, 1)
   } finally {
     await bot.dispose()
@@ -629,136 +629,6 @@ test('reading a thread claims its topic conversation', async () => {
   }
 })
 
-test('a long-context task runs in a subagent when delegation is enabled', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    let started = 0
-    let disposed = 0
-    bot.subagents.current = {
-      async startActivation(spec) {
-        started += 1
-        // The registered backend default is `spawn`; the package name is not a backend.
-        assert.equal(spec.provider, 'spawn')
-        assert.equal(spec.delivery, 'caller')
-        assert.equal(spec.parent, 'agent-1')
-        return {
-          childId: 'ses_child',
-          result: Promise.resolve({ output: [{ type: 'text', text: '来自子代理的答案' }], stopReason: 'completed' }),
-          async dispose() { disposed += 1 },
-        }
-      },
-    }
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    bot.ctx.sessionController.projections = async () => ({
-      values: {
-        turnOutline: { turns: [] },
-        sessionStats: { turns: 200 },
-        contextPressure: { surfaceTokens: 200_000 },
-      },
-    })
-    const outcome = await bot.runInSubagent('ses_1', 'ses_1', '整理一份长报告')
-    assert.deepEqual(outcome, { status: 'answered', answer: '来自子代理的答案' })
-    assert.equal(started, 1)
-    assert.equal(disposed, 1)
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('delegation stays off unless enabled', async () => {
-  const { bot, stateDir } = await createBot()
-  try {
-    bot.subagents.current = { async startActivation() { throw new Error('must not be called') } }
-    assert.equal(await bot.shouldDelegate('ses_1'), false)
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('delegation follows the configured pressure and turn thresholds', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true, taskSubagentContextThreshold: 10000, taskSubagentTurnThreshold: 50 })
-  try {
-    bot.subagents.current = { async startActivation() { throw new Error('unused') } }
-    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 500 } } })
-    assert.equal(await bot.shouldDelegate('ses_1'), false)
-    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 10 }, contextPressure: { surfaceTokens: 20000 } } })
-    assert.equal(await bot.shouldDelegate('ses_1'), true)
-    bot.ctx.sessionController.projections = async () => ({ values: { sessionStats: { turns: 90 }, contextPressure: { surfaceTokens: 500 } } })
-    assert.equal(await bot.shouldDelegate('ses_1'), true)
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('a follow-up task reuses the previous summary and can be cancelled', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    const prompts = []
-    const activations = []
-    bot.subagents.current = {
-      async startActivation(spec) {
-        prompts.push(spec.prompt.map(part => part.text).join('\n'))
-        let dispose = 0
-        const activation = {
-          childId: `ses_child_${activations.length}`,
-          result: Promise.resolve({ output: [{ type: 'text', text: `答案 ${activations.length}` }], stopReason: 'completed' }),
-          async dispose() { dispose += 1 },
-        }
-        activations.push(activation)
-        return activation
-      },
-    }
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-
-    const first = await bot.runInSubagent('oc_1', 'ses_1', '整理长报告')
-    assert.deepEqual(first, { status: 'answered', answer: '答案 0' })
-    assert.equal(bot.taskFor('oc_1')?.status, 'succeeded')
-
-    const second = await bot.runInSubagent('oc_1', 'ses_1', '再补充一点')
-    assert.deepEqual(second, { status: 'answered', answer: '答案 1' })
-    assert.ok(prompts[1].includes('答案 0'), 'follow-up should carry the previous summary')
-
-    assert.equal(await bot.cancelTask('oc_1'), false)
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('cancelTask disposes a running activation', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    let disposed = 0
-    let release
-    const gate = new Promise(resolve => { release = resolve })
-    bot.subagents.current = {
-      async startActivation() {
-        return {
-          childId: 'ses_child',
-          result: gate.then(() => ({ output: [{ type: 'text', text: 'late' }], stopReason: 'completed' })),
-          async dispose() { disposed += 1 },
-        }
-      },
-    }
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    const pending = bot.runInSubagent('oc_9', 'ses_1', 'long job')
-    await new Promise(resolve => setTimeout(resolve, 10))
-    assert.equal(await bot.cancelTask('oc_9'), true)
-    assert.equal(disposed, 1)
-    release()
-    await pending
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
 test('an accepted acknowledgement reacts on the question', async () => {
   const { bot, stateDir, spawned } = await createBot()
   try {
@@ -775,107 +645,6 @@ test('an accepted acknowledgement reacts on the question', async () => {
     const reaction = spawned.find(request => request.argv.includes('reactions'))
     const emoji = JSON.parse(reaction.argv[reaction.argv.indexOf('--data') + 1]).reaction_type.emoji_type
     assert.ok(['OnIt', 'GLANCE', 'Typing'].includes(emoji), `unexpected emoji ${emoji}`)
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('a cancelled delegated task is not retried in the main Session', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    let mainPrompted = 0
-    bot.promptAndCollect = async () => { mainPrompted += 1; return '主会话回答' }
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    bot.ctx.subagents = undefined
-    bot.subagents.current = {
-      async startActivation() {
-        // Real disposal settles the run; the stub must do the same or the
-        // delegation would await forever.
-        let settle
-        const result = new Promise(resolve => { settle = resolve })
-        return {
-          childId: 'ses_child',
-          result,
-          async dispose() { settle({ output: [{ type: 'text', text: '取消后不应投递' }], stopReason: 'aborted' }) },
-        }
-      },
-    }
-    // shouldDelegate must see pressure; stub it so the test targets cancellation.
-    bot.shouldDelegate = async () => true
-    const pending = bot.runInSubagent('oc_stop', 'ses_1', '跑一个长任务')
-    await new Promise(resolve => setTimeout(resolve, 10))
-    bot.cancelledTasks.add('oc_stop')
-    await bot.cancelTask('oc_stop')
-    const outcome = await pending
-    assert.equal(outcome.status, 'cancelled')
-    assert.equal(mainPrompted, 0, 'the main Session must not re-run a cancelled task')
-    assert.equal(bot.tasks.get('oc_stop')?.status, 'cancelled')
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('a failed delegated task reports failure instead of re-running', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    bot.subagents.current = {
-      async startActivation() {
-        return {
-          childId: 'ses_child',
-          result: Promise.resolve({ output: [], stopReason: 'error' }),
-          async dispose() {},
-        }
-      },
-    }
-    const outcome = await bot.runInSubagent('oc_fail', 'ses_1', '长任务')
-    assert.equal(outcome.status, 'failed')
-    assert.equal(bot.tasks.get('oc_fail')?.status, 'failed')
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('an unavailable backend lets the main Session answer', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
-  try {
-    // With no seam the turn is reported as unavailable so runJob can answer in
-    // the main Session; nothing is attempted and nothing is re-run.
-    const outcome = await bot.runInSubagent('oc_1', 'ses_1', '问题')
-    assert.equal(outcome.status, 'unavailable')
-    await new Promise(resolve => setTimeout(resolve, 40))
-  } finally {
-    await bot.dispose()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
-
-test('a delegated child inherits the workspace and preset', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true, cwd: '/tmp/work', agentPreset: 'feishu' })
-  try {
-    let seen
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    bot.subagents.current = {
-      async startActivation(spec) {
-        seen = spec
-        return {
-          childId: 'ses_child',
-          result: Promise.resolve({ output: [{ type: 'text', text: '好的' }], stopReason: 'completed' }),
-          async dispose() {},
-        }
-      },
-    }
-    const outcome = await bot.runInSubagent('oc_1', 'ses_1', '做点事')
-    assert.equal(outcome.status, 'answered')
-    assert.equal(seen.cwd, '/tmp/work')
-    assert.equal(seen.agentPreset, 'feishu')
-    assert.equal(seen.provider, 'spawn')
-    await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
@@ -945,55 +714,52 @@ test('the stats endpoint summarises approval counters across bots', async () => 
   }
 })
 
-test('a delegated child maps back to the bot session for approval', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+
+test('the prompt tells the agent to delegate heavy work to a subagent', async () => {
+  const { bot, stateDir, prompts } = await createBot()
   try {
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
-    bot.subagents.current = {
-      async startActivation() {
-        return {
-          childId: 'ses_child_owner',
-          result: Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' }),
-          async dispose() {},
-        }
-      },
-    }
-    const outcome = await bot.runInSubagent('oc_1', 'ses_owner', '任务')
-    assert.equal(outcome.status, 'answered')
-    // The child is gone from activations but must still resolve to its owner, so
-    // an action-mode tool call from it is approved in the right chat.
-    assert.equal(await bot.ownerSession('ses_child_owner'), 'ses_owner')
-    await new Promise(resolve => setTimeout(resolve, 40))
+    bot.onEventLine(eventLine)
+    await waitFor(() => prompts.length === 1)
+    finishTurn(bot, '好的')
+    await bot.queue.idle()
+    const header = prompts[0].content[0].text
+    assert.match(header, /委派指引:/)
+    assert.match(header, /subagent/)
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
   }
 })
 
-test('stopping a delegated task aborts the child instead of waiting for it', async () => {
-  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+test('the delegation hint can be turned off', async () => {
+  const { bot, stateDir, prompts } = await createBot({}, { delegateGuidance: '' })
   try {
-    let aborted = false
-    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    bot.onEventLine(eventLine)
+    await waitFor(() => prompts.length === 1)
+    finishTurn(bot, '好的')
+    await bot.queue.idle()
+    assert.equal(prompts[0].content[0].text.includes('委派指引'), false)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a child session is mapped to its tree root for action approval', async () => {
+  const { bot, stateDir } = await createBot({}, { approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    bot.trackSession('ses_root', 'oc_1')
+    bot.sessionContexts.set('ses_root', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent_child' })
+    let seen
     bot.subagents.current = {
-      async startActivation(spec) {
-        spec.signal.addEventListener('abort', () => { aborted = true })
-        let settle
-        const result = new Promise(resolve => { settle = resolve })
-        return {
-          childId: 'ses_child_abort',
-          result,
-          async dispose() { settle({ output: [{ type: 'text', text: 'late' }], stopReason: 'aborted' }) },
-        }
-      },
+      async startActivation() { throw new Error('unused') },
+      rootOf(agent) { seen = agent; return { session: { id: 'ses_root' } } },
     }
-    const pending = bot.runInSubagent('oc_1', 'ses_1', '长任务')
-    await new Promise(resolve => setTimeout(resolve, 10))
-    bot.cancelledTasks.add('oc_1')
-    await bot.cancelTask('oc_1')
-    const outcome = await pending
-    assert.equal(outcome.status, 'cancelled')
-    assert.equal(aborted, true, 'the child signal must be aborted, not just disposed')
+    assert.equal(await bot.ownerSession('ses_child'), 'ses_root')
+    assert.equal(seen, 'agent_child')
+    const asked = await bot.actionGate({ name: 'bash', arguments: { command: 'ls' }, agent: { session: { id: 'ses_child' } } })
+    assert.equal(asked?.kind, 'ask', 'a child action must still be approved')
     await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
     await bot.dispose()

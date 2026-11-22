@@ -140,12 +140,6 @@ test('sessionTitle prefers the group name', () => {
   assert.equal(sessionTitle(event), '飞书·b708d8dc')
 })
 
-test('the delegation backend defaults to the registered provider name', () => {
-  const config = normalizeConfig({ cwd: '/tmp', allowChats: ['oc_1'], stateDir: '/tmp/x' })
-  // `subagent-spawn-in-process` is the package name; the provider registers as `spawn`.
-  assert.equal(config.taskSubagentProvider, 'spawn')
-})
-
 test('each bot can carry its own approvers, because open_id is app-scoped', () => {
   const config = normalizeConfig({
     cwd: '/tmp',

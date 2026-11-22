@@ -40,16 +40,6 @@ export interface Config {
   replyInThread: boolean
   progress: boolean
   ackReaction: string
-  /** Delegate long tasks to a task subagent instead of growing the main Session. */
-  taskSubagentEnabled: boolean
-  /** Context pressure (surface tokens) above which a task is delegated. */
-  taskSubagentContextThreshold: number
-  /** Turn count above which a task is delegated. */
-  taskSubagentTurnThreshold: number
-  /** How long one conversation's task summary stays reusable. */
-  taskSubagentTtlMs: number
-  /** Registered subagent backend name on `ctx.subagents` (spawn provider default). */
-  taskSubagentProvider: string
   /**
    * Send approvals as interactive cards with buttons.
    *
@@ -83,6 +73,13 @@ export interface Config {
    * bot answering, so a group with two bots does not get two replies.
    */
   mentionPolicy: 'all' | 'first'
+  /**
+   * Instruction telling the agent when to delegate to a subagent.
+   *
+   * Delegation is the model's decision through DSH's built-in `subagent` tool;
+   * the bridge only suggests the conditions. Empty disables the hint.
+   */
+  delegateGuidance: string
   /**
    * Where approval happens: on the request, on the risky action, or never.
    *
@@ -132,6 +129,7 @@ export const DEFAULTS = {
   p2pSessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   chatListTtlMs: 5 * 60 * 1000,
   topicContext: 'summary' as const,
+  delegateGuidance: '需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务',
 }
 
 /** `none`/`off` (any case) disables the acknowledgement reaction. */
@@ -177,13 +175,6 @@ export function normalizeConfig(raw: unknown): Config {
     progress: value.progress !== false,
     /** Emoji reacted onto the question while it is queued; '' disables. */
     ackReaction: normalizeAckReaction(string('ackReaction', 'auto')),
-    taskSubagentEnabled: value.taskSubagentEnabled === true,
-    taskSubagentContextThreshold: integer('taskSubagentContextThreshold', 120_000, 10_000, 2_000_000),
-    taskSubagentTurnThreshold: integer('taskSubagentTurnThreshold', 80, 5, 10_000),
-    taskSubagentTtlMs: integer('taskSubagentTtlMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
-    // The provider registers under `providerName`, which defaults to `spawn`;
-    // the package name `subagent-spawn-in-process` is NOT a registered backend.
-    taskSubagentProvider: string('taskSubagentProvider', 'spawn'),
     approvalCards: value.approvalCards === true,
     approvalChannel: value.approvalChannel === 'dsh' ? 'dsh' : 'feishu',
     requestApproval: value.requestApproval === 'off' || value.requestApproval === 'all'
@@ -191,6 +182,7 @@ export function normalizeConfig(raw: unknown): Config {
       : 'non-owner',
     // 0 is a meaningful value here (trust disabled), so it bypasses integer().
     mentionPolicy: value.mentionPolicy === 'first' ? 'first' : 'all',
+    delegateGuidance: string('delegateGuidance', DEFAULTS.delegateGuidance).slice(0, 400),
     approvalMode: value.approvalMode === 'action' || value.approvalMode === 'off'
       ? value.approvalMode
       : 'request',

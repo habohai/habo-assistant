@@ -196,13 +196,9 @@ bots:
 | `p2pSessionTtlMs` | 30 天 | 私聊 Session 有效期 |
 | `chatListTtlMs` | 5 分钟 | 群名 / 群列表缓存 |
 | `ackReaction` | `auto` | `auto` 在 `OnIt` / `GLANCE` / `Typing` 间轮换；`none` 关闭；也可写死 emoji |
-| `taskSubagentEnabled` | `false` | 是否把长任务委派给 subagent |
-| `taskSubagentContextThreshold` | 120000 | 上下文 token 超过该值才委派 |
-| `taskSubagentTurnThreshold` | 80 | 轮次超过该值才委派 |
-| `taskSubagentTtlMs` | 30 分钟 | 任务摘要可复用的时长 |
-| `taskSubagentProvider` | `spawn` | 委派使用的 subagent 后端名 |
 | `requestApproval` | `non-owner` | 谁的请求需要你批准：`non-owner` / `all` / `off` |
 | `requestTrustMs` | 30 分钟 | 一次同意后该人在该群的免审时长；`0` 关闭 |
+| `delegateGuidance` | 内置一句 | 指导模型何时用 `subagent` 委派；空 = 不提示 |
 | `mentionPolicy` | `all` | 一条消息 @ 多个机器人时：`all` 都答，`first` 只让第一个答 |
 | `approvalMode` | `request` | 审批发生在 `request`（消息）/ `action`（动作）/ `off` |
 | `actionApprovalTools` | `[]` | 动作模式下算"动手"的工具；空 = 内置清单 |
@@ -229,17 +225,36 @@ bots:
 
 ## 长任务委派
 
-`taskSubagentEnabled: true` 时，若主 Session 的上下文 token 或轮次超过阈值，这一轮任务交给 task subagent 执行：
+委派走 **DSH 内置的 `subagent` 工具**，由模型自己决定，桥接层只给建议：
 
-- 群 / 话题仍然只绑定主 Session；
-- subagent 只拿到本轮问题，不复制主 Session 历史；
-- 子代理继承 `cwd` 和 `agentPreset`，在同一个工作区、同一套权限下执行；
-- 结果回到原群 / 话题，主 Session 不再被长任务撑大；
-- **停止是终态**：取消或失败都不会让主 Session 再执行一遍；
-- 只有"根本没能创建子代理"时，才回落到主 Session 回答；
-- 同一群 30 分钟内的下一次委派会带上一轮结论，保证追问不断线（不是同一个子会话）；
-- 需要 DSH 提供 `subagents` 服务，缺失时该功能自动关闭；
-- `taskSubagentProvider` 默认 `spawn`，就是 `ctx.subagents` 上注册的后端名。
+```text
+[飞书群:… | 回复要求:… | 委派指引:需要多步工具调用、长时间检索或大范围分析时，
+ 用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:海振国(ou_…)]
+```
+
+为什么不用自己实现：
+
+| | 自己实现 | DSH 内置 |
+| --- | --- | --- |
+| 记录 | 主会话看不到委派内容 | 是普通工具调用，历史和任务页都有 |
+| 复用 | 只能传摘要 | `send_message` 续聊同一个子代理 |
+| 中断 | 自己 dispose + abort | `interrupt_agent` |
+| 枚举 | 自己维护表 | `list_agents` |
+| 升级 | 依赖内部接口 | 天然兼容 |
+
+配套能力（DSH 已提供，无需配置）：
+
+- `subagent`：派活，结果回到当前会话；
+- `send_message` / `interrupt_agent` / `list_agents` / `wait_agent`：续聊、中断、列举；
+- `spawn` / `fork` 两种后端：`spawn` 是干净的新上下文，`fork` 继承对话历史。
+
+提示词可通过 `delegateGuidance` 改：
+
+```yaml
+delegateGuidance: ''   # 空 = 不提示；默认给一句「多步工具/长检索/大范围分析时用 subagent」
+```
+
+注意：委派是**模型判断**，不是阈值触发。想更保守就把条件写进 `delegateGuidance`。
 
 ## 确认表情
 
