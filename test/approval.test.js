@@ -763,3 +763,62 @@ test('the action gate never overrides another listener decision', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a second approval queues behind the first instead of failing closed', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    const first = bot.askFeishuApproval({ chatId: 'oc_1', sessionId: 'ses_1', request: { reason: '第一条' } })
+    await waitFor(() => bot.approvals.has('oc_1'))
+    const firstId = [...bot.approvals.values()][0].approvalId
+
+    const second = bot.askFeishuApproval({ chatId: 'oc_1', sessionId: 'ses_1', request: { reason: '第二条' } })
+    // The second one must not be shown yet.
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal([...bot.approvals.values()][0].approvalId, firstId)
+    assert.equal(bot.metrics.snapshot().counts.approvalBusy, undefined)
+
+    bot.settleApproval('oc_1', 'allowed-once')
+    assert.equal(await first, 'allowed-once')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    const secondId = [...bot.approvals.values()][0].approvalId
+    assert.notEqual(secondId, firstId, 'the queued approval gets its own identity')
+    bot.settleApproval('oc_1', 'rejected')
+    assert.equal(await second, 'rejected')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a queued approval gives up when the queue wait expires', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalQueueWaitMs: 1000 })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_guest' })
+    const first = bot.askFeishuApproval({ chatId: 'oc_1', sessionId: 'ses_1', request: { reason: '第一条' } })
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.config.approvalQueueWaitMs = 20
+    const second = await bot.askFeishuApproval({ chatId: 'oc_1', sessionId: 'ses_1', request: { reason: '第二条' } })
+    assert.equal(second, 'unavailable')
+    assert.equal(bot.metrics.snapshot().counts.approvalBusy, 1)
+    bot.settleApproval('oc_1', 'rejected')
+    assert.equal(await first, 'rejected')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('action mode takes over from request mode instead of stacking', async () => {
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_owner'], approvalMode: 'action' })
+  try {
+    const guest = { chatId: 'oc_1', chatType: 'group', messageId: 'om_1', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '跑个命令' }
+    // One operation must be approved once, not twice.
+    assert.equal(bot.needsRequestApproval(guest), false)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

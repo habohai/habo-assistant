@@ -204,6 +204,8 @@ export class FeishuBot {
   private readonly activations: Map<string, SubagentActivationLike>
   /** Conversations the user stopped while a delegated task was in flight. */
   private readonly cancelledTasks: Set<string>
+  /** Per-chat chain: a second approval waits instead of failing closed. */
+  private readonly approvalQueue: Map<string, Promise<void>>
   /** `${chatId}::${senderId}` -> trust expiry after one approval. */
   private readonly requestTrust: Map<string, number>
   /**
@@ -275,6 +277,7 @@ export class FeishuBot {
     this.activations = new Map()
     this.cancelledTasks = new Set()
     this.requestTrust = new Map()
+    this.approvalQueue = new Map()
     this.recentSenders = new Map()
     this.senderNames = new Map()
     this.dangerPatterns = compileDenyPatterns(DEFAULT_DENY_PATTERNS)
@@ -726,6 +729,7 @@ export class FeishuBot {
 
   /** Whether this request must be approved before the bot acts on it. */
   needsRequestApproval(event: FeishuEvent): boolean {
+    if (this.config.approvalMode === 'action') return false
     const policy = this.config.requestApproval
     if (policy === 'off') return false
     if (this.config.approveUsers.length === 0) return false
@@ -949,6 +953,37 @@ export class FeishuBot {
     return toDshOutcome(await this.askFeishuApproval({ chatId, sessionId, request }))
   }
 
+  /**
+   * Wait for this chat's approval slot.
+   *
+   * One chat shows one approval at a time — a group cannot answer two questions
+   * in one message — so a concurrent request queues instead of failing closed.
+   * Returns undefined when the wait exceeded `approvalQueueWaitMs`.
+   */
+  async acquireApprovalSlot(chatId: string): Promise<(() => void) | undefined> {
+    const previous = this.approvalQueue.get(chatId) ?? Promise.resolve()
+    let release = (): void => {}
+    const current = new Promise<void>(resolve => { release = resolve })
+    const chained = previous.then(() => current)
+    this.approvalQueue.set(chatId, chained)
+    const waited = await Promise.race([
+      previous.then(() => true),
+      new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), this.config.approvalQueueWaitMs)
+        timer.unref?.()
+      }),
+    ])
+    if (waited) {
+      return () => {
+        release()
+        if (this.approvalQueue.get(chatId) === chained) this.approvalQueue.delete(chatId)
+      }
+    }
+    release()
+    if (this.approvalQueue.get(chatId) === chained) this.approvalQueue.delete(chatId)
+    return undefined
+  }
+
   askFeishuApproval({ chatId, sessionId, request, replyTo, kind = 'tool' }: {
     chatId: string
     sessionId: string
@@ -958,10 +993,41 @@ export class FeishuBot {
     kind?: 'tool' | 'request'
   }): Promise<ApprovalOutcome> {
     if (request.signal?.aborted) return Promise.resolve('cancelled')
-    if (this.approvals.has(chatId)) {
-      this.ctx.logger.warn(`feishu-bot: an approval is already pending in ${chatId}; refusing a second one`)
-      return Promise.resolve('unavailable')
+    return this.queueApproval({ chatId, sessionId, request, replyTo, kind })
+  }
+
+  /** Queue one approval, then run it while holding the chat slot. */
+  private async queueApproval({ chatId, sessionId, request, replyTo, kind }: {
+    chatId: string
+    sessionId: string
+    request: ApprovalRequest
+    replyTo?: { messageId?: string; threadId?: string }
+    kind: 'tool' | 'request'
+  }): Promise<ApprovalOutcome> {
+    const slot = await this.acquireApprovalSlot(chatId)
+    if (slot === undefined) {
+      this.metrics.inc('approvalBusy')
+      this.ctx.logger.warn(`feishu-bot: another approval is still open in ${chatId}; giving up after the queue wait`)
+      return 'unavailable'
     }
+    try {
+      return await this.runApproval({ chatId, sessionId, request, replyTo, kind })
+    } finally {
+      slot()
+    }
+  }
+
+  /** Ask one approval now that the chat's slot is held. */
+  private async runApproval({ chatId, sessionId, request, replyTo, kind }: {
+    chatId: string
+    sessionId: string
+    request: ApprovalRequest
+    replyTo?: { messageId?: string; threadId?: string }
+    kind: 'tool' | 'request'
+  }): Promise<ApprovalOutcome> {
+    // The wait may outlive the call: re-check before registering listeners on a
+    // signal that already fired, where `addEventListener` would never run.
+    if (request.signal?.aborted) return 'cancelled'
     const reason = firstNonEmpty(request?.displayReason, request?.reason, '执行命令')
     const seconds = Math.round(this.config.approvalTimeoutMs / 1000)
     // Feishu de-duplicates a send by its idempotency key for about an hour, so

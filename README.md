@@ -207,6 +207,7 @@ bots:
 | `approvalMode` | `request` | 审批发生在 `request`（消息）/ `action`（动作）/ `off` |
 | `actionApprovalTools` | `[]` | 动作模式下算"动手"的工具；空 = 内置清单 |
 | `alwaysAskDangerous` | `true` | 危险命令即使有信任窗口也再问一次 |
+| `approvalQueueWaitMs` | 30000 | 同群第二条审批最多排队多久 |
 | `approvalCards` | `false` | 是否用互动卡片审批（需要应用配置卡片回调） |
 | `approvalChannel` | `feishu` | 审批渠道：`feishu`（发群里）或 `dsh`（交给桌面端） |
 | `stateDir` | `~/.dsh/feishu-bot` | 绑定与去重状态目录 |
@@ -313,7 +314,9 @@ alwaysAskDangerous: true    # 危险命令即使有信任也再问
 
 内置"动手"清单：`bash`、`pwsh`、`write`、`edit`、`apply_patch`、`str_replace_editor`、`terminal_*`、`job_kill`、`schedule_create`、`subagent`、`workflow`。
 
-**`request` 与 `action` 互斥**：同时生效会让同一次操作问你两遍。
+**`request` 与 `action` 互斥**，代码层面已经保证：设成 `action` 后，消息入口那道审批自动失效，不会同一次操作问你两遍。
+
+同一个群里同时只显示一条审批；后来的会排队等（`approvalQueueWaitMs`，默认 30 秒），等不到就明确告知放弃，不会静默失败。
 
 ### 关于互动卡片按钮
 

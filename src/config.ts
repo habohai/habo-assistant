@@ -95,6 +95,8 @@ export interface Config {
   actionApprovalTools: string[]
   /** Ask again for a dangerous command even inside a trust window. */
   alwaysAskDangerous: boolean
+  /** How long a second approval may wait for the chat's queue to drain. */
+  approvalQueueWaitMs: number
   timeoutMs: number
   maxReplyChars: number
   /** Prompt-level style constraints for every Feishu reply. */
@@ -194,6 +196,7 @@ export function normalizeConfig(raw: unknown): Config {
       : 'request',
     actionApprovalTools: list('actionApprovalTools'),
     alwaysAskDangerous: value.alwaysAskDangerous !== false,
+    approvalQueueWaitMs: integer('approvalQueueWaitMs', 30_000, 0, 10 * 60 * 1000),
     requestTrustMs: value.requestTrustMs === 0
       ? 0
       : integer('requestTrustMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
