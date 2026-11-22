@@ -82,7 +82,16 @@ function firstNonEmpty(...values: unknown[]): string {
   return ''
 }
 
+/** Internal outcome, including our own "nobody answered" state. */
 type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' | 'expired'
+
+/** What DSH accepts from `approval/request`; anything else throws inside its pipeline. */
+type DshApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
+/** An internal outcome crossing back into DSH; expiry fails closed as unavailable. */
+function toDshOutcome(outcome: ApprovalOutcome): DshApprovalOutcome {
+  return outcome === 'expired' ? 'unavailable' : outcome
+}
 
 /** Mutable holder for the optional subagent seam, filled after inject resolves. */
 export interface SubagentSeam {
@@ -848,7 +857,7 @@ export class FeishuBot {
   }
 
   /** Answer one approval request ourselves when it belongs to a bot session. */
-  async answerApproval(request: ApprovalRequest, next: () => Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
+  async answerApproval(request: ApprovalRequest, next: () => Promise<DshApprovalOutcome>): Promise<DshApprovalOutcome> {
     if (this.stopping || request?.signal?.aborted) return Promise.resolve('cancelled')
     const sessionId = request?.agent?.session?.id
     if (typeof sessionId !== 'string' || !this.botSessions.has(sessionId)) return next()
@@ -861,7 +870,7 @@ export class FeishuBot {
     // approver exists.
     if (this.config.approvalChannel === 'feishu' && this.config.approveUsers.length > 0) {
       this.metrics.inc('approvalFeishu')
-      return this.askFeishuApproval({ chatId, sessionId, request })
+      return toDshOutcome(await this.askFeishuApproval({ chatId, sessionId, request }))
     }
     let dsh: ApprovalOutcome = 'unavailable'
     try {
@@ -875,7 +884,7 @@ export class FeishuBot {
       return dsh
     }
     if (this.config.approveUsers.length === 0) return 'unavailable'
-    return this.askFeishuApproval({ chatId, sessionId, request })
+    return toDshOutcome(await this.askFeishuApproval({ chatId, sessionId, request }))
   }
 
   askFeishuApproval({ chatId, sessionId, request, replyTo, kind = 'tool' }: {

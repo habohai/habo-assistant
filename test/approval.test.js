@@ -265,9 +265,8 @@ test('an unanswered tool approval expires', async () => {
       reason: '命令审批：ls',
       signal: new AbortController().signal,
     }, () => Promise.resolve('unavailable'))
-    // Timeouts are distinct from "could not ask": the caller must not report a
-    // send failure for an approval the user simply never answered.
-    assert.equal(await pending, 'expired')
+    // DSH only accepts its own four outcomes; expiry fails closed as unavailable.
+    assert.equal(await pending, 'unavailable')
   } finally {
     clearInterval(keepAlive)
     await bot.dispose()
@@ -660,6 +659,26 @@ test('a request approval that expires sends one notice, not two', async () => {
     await gated
     assert.equal(bot.metrics.snapshot().counts.requestDenied, 1)
     assert.equal(bot.isTrusted('oc_1', 'ou_guest'), false)
+  } finally {
+    clearInterval(keepAlive)
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a timeout is reported to DSH as unavailable, never as an unknown outcome', async () => {
+  // DSH switches on the outcome with an exhaustive check; a made-up value throws
+  // inside its tool pipeline, so expiry must fail closed as `unavailable`.
+  const { bot, stateDir } = await createBot({ approveUsers: ['ou_1'] })
+  const keepAlive = setInterval(() => {}, 50)
+  try {
+    bot.config.approvalTimeoutMs = 20
+    bot.trackSession('ses_1', 'oc_1')
+    const outcome = await bot.answerApproval(
+      { agent: { session: { id: 'ses_1' } }, toolName: 'bash', reason: '命令审批：ls', signal: new AbortController().signal },
+      () => Promise.resolve('unavailable'),
+    )
+    assert.equal(outcome, 'unavailable')
   } finally {
     clearInterval(keepAlive)
     await bot.dispose()
