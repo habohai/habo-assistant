@@ -1882,8 +1882,12 @@ export class BotHost {
   }
 }
 
-/** Services required by the bridge. */
-export const inject = ['subprocess', 'sessionController', 'sessionProjections', 'tools', 'sessions', 'permissionPresets', 'webServer']
+/** Services the bridge needs, plus optional ones whose absence only disables a feature. */
+export const inject = {
+  required: ['subprocess', 'sessionController', 'sessionProjections', 'tools', 'sessions', 'permissionPresets', 'webServer'],
+  optional: ['subagents'],
+}
+
 
 /**
  * Mount the bridge.
