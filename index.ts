@@ -61,6 +61,7 @@ export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
+export { idempotencyKey } from './src/lark.js'
 export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 export type { ReplyKind, ReplyPlan, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
@@ -609,7 +610,15 @@ export class FeishuBot {
     })
     if (allowed !== 'allowed-once') {
       this.metrics.inc('requestDenied')
-      this.fireReply(event, allowed === 'rejected' ? '该请求已被拒绝。' : '该请求未获批准，已作废。')
+      this.ctx.logger.info(`feishu-bot: request ${allowed} chat=${event.chatId} sender=${event.senderId}`)
+      this.fireReply(
+        event,
+        allowed === 'rejected'
+          ? '该请求已被拒绝。'
+          : allowed === 'cancelled'
+            ? '该请求已取消。'
+            : '审批请求没能发出（请看日志），本次请求已作废。',
+      )
       return
     }
     this.metrics.inc('requestAllowed')

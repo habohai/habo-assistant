@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { FeishuBot, normalizeConfig } from '../lib/index.js'
+import { FeishuBot, normalizeConfig, idempotencyKey } from '../lib/index.js'
 
 /** Minimal DSH surface: only what the bridge touches. */
 function createHarness({ failEdit = false, echoReplyId = false } = {}) {
@@ -111,7 +111,7 @@ test('an accepted message gets an immediate placeholder that becomes the answer'
     await bot.queue.idle()
 
     const replies = findCalls(spawned, '+messages-reply')
-    const acks = replies.filter(request => flagValue(request.argv, '--idempotency-key') === 'feishu-om_1-ack')
+    const acks = replies.filter(request => flagValue(request.argv, '--idempotency-key') === idempotencyKey('feishu-reply', 'om_1', 'ack'))
     assert.equal(acks.length, 1)
     assert.match(flagValue(acks[0].argv, '--text'), /收到/)
 
@@ -142,10 +142,10 @@ test('a long answer keeps the placeholder for the first chunk and replies with t
     assert.equal(flagValue(edits[0].argv, '--text').length, 200)
 
     const replies = findCalls(spawned, '+messages-reply')
-      .filter(request => flagValue(request.argv, '--idempotency-key') !== 'feishu-om_1-ack')
+      .filter(request => flagValue(request.argv, '--idempotency-key') !== idempotencyKey('feishu-reply', 'om_1', 'ack'))
     assert.deepEqual(
       replies.map(request => flagValue(request.argv, '--idempotency-key')),
-      ['feishu-om_1-1', 'feishu-om_1-2'],
+      [idempotencyKey('feishu-reply', 'om_1', '1'), idempotencyKey('feishu-reply', 'om_1', '2')],
     )
   } finally {
     await bot.dispose()
@@ -166,7 +166,7 @@ test('an edit failure withdraws the placeholder and falls back to a reply', asyn
     assert.match(flagValue(deletes[0].argv, '--params'), /om_sent_1/)
 
     const replies = findCalls(spawned, '+messages-reply')
-      .filter(request => flagValue(request.argv, '--idempotency-key') === 'feishu-om_1-0')
+      .filter(request => flagValue(request.argv, '--idempotency-key') === idempotencyKey('feishu-reply', 'om_1', '0'))
     assert.equal(replies.length, 1)
     assert.equal(flagValue(replies[0].argv, '--text'), '最终答案')
   } finally {

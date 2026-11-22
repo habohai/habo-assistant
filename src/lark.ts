@@ -86,6 +86,22 @@ export function parseMessageId(stdout: string): string | undefined {
   }
 }
 
+/**
+ * Stable idempotency key for one logical send.
+ *
+ * Feishu caps `uuid` at 50 characters, so the key is a hash of the identifying
+ * parts: retries of the same send reuse it (no duplicate message), while two
+ * different sends never collide.
+ */
+export function idempotencyKey(prefix: string, ...parts: string[]): string {
+  const joined = parts.join('|')
+  let hash = 0
+  for (let index = 0; index < joined.length; index += 1) {
+    hash = (hash * 31 + joined.charCodeAt(index)) % 2_147_483_647
+  }
+  return `${prefix}-${hash.toString(36)}`
+}
+
 export class LarkCli {
   private readonly ctx: LarkContext
   private readonly name: string
@@ -384,7 +400,7 @@ export class LarkCli {
       '--message-id', messageId,
       ...(kind === 'post' ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
-      '--idempotency-key', `feishu-${messageId.slice(0, 28)}-${keySuffix}`,
+      '--idempotency-key', idempotencyKey('feishu-reply', messageId, keySuffix),
       ...(inThread === true ? ['--reply-in-thread'] : []),
     ]
     const startedAt = Date.now()
@@ -452,7 +468,7 @@ export class LarkCli {
       '--chat-id', chatId,
       ...(kind === 'post' ? ['--markdown', text] : ['--text', text]),
       '--as', 'bot',
-      '--idempotency-key', `feishu-send-${chatId.slice(0, 18)}-${keySuffix}`.slice(0, 50),
+      '--idempotency-key', idempotencyKey('feishu-send', chatId, keySuffix),
     ]
     const startedAt = Date.now()
     try {
@@ -497,7 +513,7 @@ export class LarkCli {
       '--msg-type', 'interactive',
       '--content', JSON.stringify(card),
       '--as', 'bot',
-      '--idempotency-key', `feishu-card-${chatId.slice(0, 18)}-${keySuffix}`.slice(0, 50),
+      '--idempotency-key', idempotencyKey('feishu-card', chatId, keySuffix),
     ])
     return parseMessageId(stdout)
   }

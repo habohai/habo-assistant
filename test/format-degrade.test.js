@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LarkCli } from '../lib/index.js'
+import { LarkCli, idempotencyKey } from '../lib/index.js'
 
 /** Minimal subprocess double that fails the first N invocations. */
 function harness(failures) {
@@ -52,4 +52,26 @@ test('a rejected post send is retried as plain text', async () => {
   assert.equal(calls.length, 2)
   assert.ok(calls[0].includes('--markdown'))
   assert.ok(calls[1].includes('--text'))
+})
+
+test('idempotency keys stay under the 50-character Feishu limit', () => {
+  // A long suffix used to push the key past 50 chars, and Feishu rejected the
+  // send; approvals then resolved as "unavailable" without ever being asked.
+  const longSuffix = 'ap_lz3k9x2a1b7c4d'
+  for (const key of [
+    idempotencyKey('feishu-reply', 'om_x100b7f1cc6b38ca0b37d9b23dff6b29', longSuffix),
+    idempotencyKey('feishu-send', 'oc_707a9555790cf543644c3896b708d8dc', longSuffix),
+    idempotencyKey('feishu-card', 'oc_707a9555790cf543644c3896b708d8dc', longSuffix),
+  ]) {
+    assert.ok(key.length <= 50, `key too long: ${key} (${key.length})`)
+    assert.ok(key.length > 3)
+  }
+})
+
+test('idempotency keys are stable per send and distinct across sends', () => {
+  const a = idempotencyKey('feishu-reply', 'om_1', 'ap_1')
+  const b = idempotencyKey('feishu-reply', 'om_1', 'ap_1')
+  const c = idempotencyKey('feishu-reply', 'om_1', 'ap_2')
+  assert.equal(a, b)
+  assert.notEqual(a, c)
 })
