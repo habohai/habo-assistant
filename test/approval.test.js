@@ -354,10 +354,11 @@ test('a card click settles the same approval entry', async () => {
       signal: new AbortController().signal,
     }, () => Promise.resolve('unavailable'))
     await waitFor(() => bot.approvals.has('oc_1'))
+    const approvalId = [...bot.approvals.values()][0].approvalId
     bot.onCardActionLine(JSON.stringify({
       chat_id: 'oc_1',
       operator: { open_id: 'ou_owner' },
-      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', approvalId, decision: 'allow' } },
     }))
     assert.equal(await pending, 'allowed-once')
     assert.equal(bot.metrics.snapshot().counts.approvalAllowed, 1)
@@ -380,14 +381,89 @@ test('a card click from a non-approver is ignored', async () => {
       signal: new AbortController().signal,
     }, () => Promise.resolve('unavailable'))
     await waitFor(() => bot.approvals.has('oc_1'))
+    const approvalId = [...bot.approvals.values()][0].approvalId
     bot.onCardActionLine(JSON.stringify({
       chat_id: 'oc_1',
       operator: { open_id: 'ou_stranger' },
-      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', approvalId, decision: 'allow' } },
     }))
     assert.equal(bot.approvals.has('oc_1'), true)
     bot.settleApproval('oc_1', 'cancelled')
     assert.equal(await pending, 'cancelled')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a stale card cannot settle a later approval', async () => {
+  const { bot, stateDir, listeners } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.installApprovalGate()
+    const answerer = listeners.get('approval/request')
+    const pending = answerer({
+      agent: { session: { id: 'ses_1' } },
+      toolName: 'bash',
+      reason: '命令审批：ls',
+      signal: new AbortController().signal,
+    }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    // A click from an earlier approval must not approve the current one.
+    bot.onCardActionLine(JSON.stringify({
+      chat_id: 'oc_1',
+      operator: { open_id: 'ou_owner' },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', approvalId: 'ap_older', decision: 'allow' } },
+    }))
+    assert.equal(bot.approvals.has('oc_1'), true, 'the pending approval must stay pending')
+    assert.equal(bot.metrics.snapshot().counts.approvalStale, 1)
+    bot.onCardActionLine(JSON.stringify({
+      chat_id: 'oc_1',
+      operator: { open_id: 'ou_owner' },
+      action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+    }))
+    assert.equal(bot.approvals.has('oc_1'), true, 'a legacy card without an identity is ignored too')
+    bot.settleApproval('oc_1', 'cancelled')
+    assert.equal(await pending, 'cancelled')
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('each approval uses its own send idempotency key', async () => {
+  const { bot, stateDir, listeners, spawned } = await createBot({ approveUsers: ['ou_owner'] }, { approvalCards: false })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.installApprovalGate()
+    const answerer = listeners.get('approval/request')
+    const first = answerer({
+      agent: { session: { id: 'ses_1' } },
+      toolName: 'bash',
+      reason: '命令审批：one',
+      signal: new AbortController().signal,
+    }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.settleApproval('oc_1', 'cancelled')
+    await first
+    const second = answerer({
+      agent: { session: { id: 'ses_1' } },
+      toolName: 'bash',
+      reason: '命令审批：two',
+      signal: new AbortController().signal,
+    }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.settleApproval('oc_1', 'cancelled')
+    await second
+    const keys = spawned
+      .filter(request => request.argv.includes('+messages-send') || request.argv.includes('+messages-reply'))
+      .map(request => {
+        const index = request.argv.indexOf('--idempotency-key')
+        return index === -1 ? undefined : request.argv[index + 1]
+      })
+      .filter(key => key !== undefined)
+    assert.ok(keys.length >= 2, `expected at least two sends, got ${keys.length}`)
+    assert.equal(new Set(keys).size, keys.length, `idempotency keys collided: ${keys.join(', ')}`)
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })

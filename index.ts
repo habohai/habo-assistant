@@ -123,6 +123,8 @@ interface ApprovalRequest {
 }
 
 interface ApprovalEntry {
+  /** Identity of this approval; a click must match it to settle. */
+  approvalId: string
   chatId: string
   sessionId: string
   messageId?: string
@@ -358,6 +360,14 @@ export class FeishuBot {
     if (this.config.approveUsers.length > 0 && !this.config.approveUsers.includes(action.operatorId)) {
       this.metrics.inc('approvalIgnored')
       this.ctx.logger.warn(`feishu-bot: ${action.operatorId || 'unknown'} may not approve via card in ${action.chatId}`)
+      return
+    }
+    // A stale card must never settle a later approval: the click has to name
+    // the exact approval it was created for.
+    const entry = this.approvals.get(action.chatId)
+    if (entry === undefined || action.approvalId === undefined || action.approvalId !== entry.approvalId) {
+      this.metrics.inc('approvalStale')
+      this.ctx.logger.warn(`feishu-bot: ignoring a stale approval click in ${action.chatId}`)
       return
     }
     this.metrics.inc(action.decision === 'allow' ? 'approvalAllowed' : 'approvalRejected')
@@ -667,6 +677,9 @@ export class FeishuBot {
     }
     const reason = firstNonEmpty(request?.displayReason, request?.reason, '执行命令')
     const seconds = Math.round(this.config.approvalTimeoutMs / 1000)
+    // Feishu de-duplicates a send by its idempotency key for about an hour, so
+    // the key must identify this approval, not just the chat.
+    const approvalId = `ap_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
     const prompt = `⚠️ 需要审批\n${reason}\n\n回复「@我 同意」执行，「@我 拒绝」取消（仅限指定审批人，${seconds} 秒内有效）`
     this.metrics.inc('approvalAsked')
     const context = this.sessionContexts.get(sessionId)
@@ -674,7 +687,7 @@ export class FeishuBot {
     const threadId = context?.threadId ?? ''
     this.ctx.logger.info(`feishu-bot: approval requested chat=${chatId} session=${sessionId}`)
     return new Promise<ApprovalOutcome>(resolve => {
-      const entry: ApprovalEntry = { chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
+      const entry: ApprovalEntry = { approvalId, chatId, sessionId, messageId, threadId, resolve, timer: undefined, signal: request?.signal, onAbort: undefined }
       this.approvals.set(chatId, entry)
       entry.timer = setTimeout(() => {
         this.settleApproval(chatId, 'unavailable', '⏰ 审批超时，该命令没有执行。')
@@ -687,15 +700,15 @@ export class FeishuBot {
         signal.addEventListener('abort', onAbort, { once: true })
       }
       const ask = this.config.approvalCards
-        ? this.cli.sendCard(chatId, approvalCard(reason, chatId, seconds), 'approval')
+        ? this.cli.sendCard(chatId, approvalCard(reason, chatId, approvalId, seconds), approvalId)
         : messageId === undefined
-          ? this.cli.send(chatId, prompt)
-          : this.cli.reply(messageId, prompt, { inThread: threadId !== '', keySuffix: 'approval' })
+          ? this.cli.send(chatId, prompt, approvalId)
+          : this.cli.reply(messageId, prompt, { inThread: threadId !== '', keySuffix: approvalId })
       void ask.catch(error => {
         this.ctx.logger.warn(`feishu-bot: cannot ask for approval in ${chatId}: ${String(error)}`)
         // A card the CLI cannot render must not swallow the approval.
         if (this.config.approvalCards) {
-          const fallback = this.cli.send(chatId, prompt)
+          const fallback = this.cli.send(chatId, prompt, `${approvalId}-fb`)
           void fallback.catch(() => { this.settleApproval(chatId, 'unavailable') })
           return
         }
@@ -714,8 +727,8 @@ export class FeishuBot {
     entry.resolve(outcome)
     if (note !== undefined && !this.stopping) {
       const reply = entry.messageId === undefined
-        ? this.cli.send(chatId, note)
-        : this.cli.reply(entry.messageId, note, { inThread: entry.threadId !== '', keySuffix: 'approval-note' })
+        ? this.cli.send(chatId, note, `${entry.approvalId}-note`)
+        : this.cli.reply(entry.messageId, note, { inThread: entry.threadId !== '', keySuffix: `${entry.approvalId}-note` })
       reply.catch(error => {
         this.ctx.logger.warn(`feishu-bot: approval note failed: ${String(error)}`)
       })
@@ -1249,39 +1262,6 @@ export class FeishuBot {
     if (pressure === undefined) return false
     return pressure.surfaceTokens > this.config.taskSubagentContextThreshold
       || pressure.turns > this.config.taskSubagentTurnThreshold
-  }
-
-  /**
-   * TEMPORARY diagnostic: start one throwaway child to prove the backend works.
-   * Removed once the delegation path is verified end to end.
-   */
-  async delegateProbe(): Promise<Record<string, unknown>> {
-    const seam = this.subagentSeam()
-    if (seam === undefined) return { error: 'subagents service missing' }
-    const backend = this.taskBackendStatus()
-    const sessionId = [...this.sessionContexts.keys()][0]
-    if (sessionId === undefined) return { error: 'no tracked session', backend }
-    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
-    const parent = (resolved as { agent?: unknown }).agent
-    if (parent === undefined || parent === null) return { error: 'no live parent agent', backend }
-    const controller = new AbortController()
-    const startedAt = Date.now()
-    try {
-      const activation = await seam.startActivation({
-        provider: this.config.taskSubagentProvider,
-        parent,
-        prompt: [{ type: 'text', text: '只回复两个字：收到' }],
-        signal: controller.signal,
-        delivery: 'caller',
-        label: 'feishu-probe',
-      })
-      const result = await activation.result
-      const text = (result.output ?? []).map(block => block.text ?? '').join('').trim().slice(0, 120)
-      await activation.dispose().catch(() => {})
-      return { ok: true, backend, childId: activation.childId, stopReason: result.stopReason, text, ms: Date.now() - startedAt }
-    } catch (error) {
-      return { ok: false, backend, error: String(error), ms: Date.now() - startedAt }
-    }
   }
 
   /**
@@ -2402,11 +2382,6 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   if (method === 'GET') {
     if (url.searchParams.get('action') === 'health') {
       sendJson(res, 200, { ok: true, value: bot.status() })
-      return
-    }
-    if (url.searchParams.get('action') === 'delegate-probe') {
-      const primary = bot.bots[0]
-      sendJson(res, 200, { ok: true, value: primary === undefined ? { error: 'no bot' } : await primary.delegateProbe() })
       return
     }
     if (url.searchParams.get('action') === 'chats') {

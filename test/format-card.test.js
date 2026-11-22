@@ -3,11 +3,11 @@ import test from 'node:test'
 import { approvalCard, approvalResultCard, readCardAction } from '../lib/index.js'
 
 test('approvalCard carries chat and decision in each button', () => {
-  const card = approvalCard('执行命令：pnpm test', 'oc_1', 120)
+  const card = approvalCard('执行命令：pnpm test', 'oc_1', 'ap_1', 120)
   const actions = card.elements.find(element => element.tag === 'action').actions
   assert.equal(actions.length, 2)
-  assert.deepEqual(actions[0].value, { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' })
-  assert.deepEqual(actions[1].value, { kind: 'feishu-approval', chatId: 'oc_1', decision: 'reject' })
+  assert.deepEqual(actions[0].value, { kind: 'feishu-approval', chatId: 'oc_1', approvalId: 'ap_1', decision: 'allow' })
+  assert.deepEqual(actions[1].value, { kind: 'feishu-approval', chatId: 'oc_1', approvalId: 'ap_1', decision: 'reject' })
 })
 
 test('approvalResultCard drops the buttons', () => {
@@ -20,9 +20,9 @@ test('readCardAction reads the flat CLI shape', () => {
   const action = readCardAction({
     chat_id: 'oc_1',
     operator: { open_id: 'ou_owner' },
-    action: { value: { kind: 'feishu-approval', chatId: 'oc_1', decision: 'allow' } },
+    action: { value: { kind: 'feishu-approval', chatId: 'oc_1', approvalId: 'ap_1', decision: 'allow' } },
   })
-  assert.deepEqual(action, { chatId: 'oc_1', decision: 'allow', operatorId: 'ou_owner' })
+  assert.deepEqual(action, { chatId: 'oc_1', decision: 'allow', operatorId: 'ou_owner', approvalId: 'ap_1' })
 })
 
 test('readCardAction reads the envelope and ignores unrelated cards', () => {
@@ -33,6 +33,8 @@ test('readCardAction reads the envelope and ignores unrelated cards', () => {
       action: { value: { kind: 'feishu-approval', chatId: 'oc_2', decision: 'reject' } },
     },
   })
+  // Legacy cards without an approval identity still parse, so the caller can
+  // reject them explicitly instead of settling the wrong entry.
   assert.deepEqual(wrapped, { chatId: 'oc_2', decision: 'reject', operatorId: 'ou_owner' })
   assert.equal(readCardAction({ action: { value: { kind: 'other' } } }), undefined)
   assert.equal(readCardAction({ action: { value: { kind: 'feishu-approval', decision: 'maybe' } } }), undefined)

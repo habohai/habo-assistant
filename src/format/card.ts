@@ -10,12 +10,16 @@
 export interface ApprovalCardValue {
   kind: 'feishu-approval'
   chatId: string
+  /** Identity of the exact approval this button belongs to. */
+  approvalId: string
   decision: 'allow' | 'reject'
 }
 
 /** One action-button click, already flattened from the CLI event. */
 export interface CardAction {
   chatId: string
+  /** Approval the clicked card was created for; absent on legacy cards. */
+  approvalId?: string
   decision: 'allow' | 'reject'
   /** open_id of the person who clicked, when the event provides it. */
   operatorId: string
@@ -24,7 +28,7 @@ export interface CardAction {
 }
 
 /** Build the approval card for one command. */
-export function approvalCard(reason: string, chatId: string, seconds: number): unknown {
+export function approvalCard(reason: string, chatId: string, approvalId: string, seconds: number): unknown {
   return {
     config: { wide_screen_mode: true, update_multi: true },
     header: {
@@ -47,13 +51,13 @@ export function approvalCard(reason: string, chatId: string, seconds: number): u
             tag: 'button',
             text: { tag: 'plain_text', content: '同意' },
             type: 'primary',
-            value: { kind: 'feishu-approval', chatId, decision: 'allow' } satisfies ApprovalCardValue,
+            value: { kind: 'feishu-approval', chatId, approvalId, decision: 'allow' } satisfies ApprovalCardValue,
           },
           {
             tag: 'button',
             text: { tag: 'plain_text', content: '拒绝' },
             type: 'danger',
-            value: { kind: 'feishu-approval', chatId, decision: 'reject' } satisfies ApprovalCardValue,
+            value: { kind: 'feishu-approval', chatId, approvalId, decision: 'reject' } satisfies ApprovalCardValue,
           },
         ],
       },
@@ -91,6 +95,9 @@ export function readCardAction(raw: unknown): CardAction | undefined {
   if (payload.kind !== 'feishu-approval') return undefined
   const decision = payload.decision === 'allow' ? 'allow' : payload.decision === 'reject' ? 'reject' : undefined
   if (decision === undefined) return undefined
+  const approvalId = typeof payload.approvalId === 'string' && payload.approvalId !== ''
+    ? payload.approvalId
+    : undefined
   const chatId = typeof payload.chatId === 'string' && payload.chatId !== ''
     ? payload.chatId
     : typeof event.chat_id === 'string' ? event.chat_id : ''
@@ -98,5 +105,5 @@ export function readCardAction(raw: unknown): CardAction | undefined {
   const operator = event.operator as { open_id?: unknown } | undefined
   const operatorId = typeof operator?.open_id === 'string' ? operator.open_id : ''
   const token = typeof event.token === 'string' && event.token !== '' ? event.token : undefined
-  return { chatId, decision, operatorId, ...(token === undefined ? {} : { token }) }
+  return { chatId, decision, operatorId, ...(approvalId === undefined ? {} : { approvalId }), ...(token === undefined ? {} : { token }) }
 }
