@@ -518,6 +518,13 @@ export class FeishuBot {
       return
     }
     if (this.handleApprovalReply(event, text)) return
+    // A bare 同意/拒绝 with nothing pending is almost never a real question;
+    // answer it directly instead of spending a model turn on it.
+    if (parseApprovalReply(text) !== undefined) {
+      this.metrics.inc('approvalIdle')
+      this.fireReply(event, '当前没有待审批的命令。')
+      return
+    }
     if (!this.isAllowedChat(event.chatId)) {
       if (!this.canEnableChat(event)) {
         this.metrics.inc('ignored')

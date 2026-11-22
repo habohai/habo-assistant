@@ -494,3 +494,30 @@ test('a bot-session approval goes to the chat group by default', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a bare 同意 with nothing pending answers without a model turn', async () => {
+  const { bot, stateDir, spawned } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.allowChatNoPersist?.('oc_1')
+    bot.onEventLine(JSON.stringify({
+      chat_id: 'oc_1',
+      chat_type: 'group',
+      message_id: 'om_bare',
+      sender_type: 'user',
+      sender_id: 'ou_owner',
+      message_type: 'text',
+      content: '@_user_1 同意',
+      mentions: [{ id: 'ou_bot' }],
+    }))
+    await waitFor(() => spawned.some(request => request.argv.includes('+messages-reply')))
+    const reply = spawned.find(request => request.argv.includes('+messages-reply'))
+    const text = reply.argv[reply.argv.indexOf('--text') + 1]
+    assert.match(text, /没有待审批/)
+    assert.equal(bot.queue.isIdle(), true, 'no model turn should be queued')
+    assert.equal(bot.metrics.snapshot().counts.approvalIdle, 1)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
