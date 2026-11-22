@@ -944,3 +944,59 @@ test('the stats endpoint summarises approval counters across bots', async () => 
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a delegated child maps back to the bot session for approval', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+  try {
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    bot.subagents.current = {
+      async startActivation() {
+        return {
+          childId: 'ses_child_owner',
+          result: Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' }),
+          async dispose() {},
+        }
+      },
+    }
+    const outcome = await bot.runInSubagent('oc_1', 'ses_owner', '任务')
+    assert.equal(outcome.status, 'answered')
+    // The child is gone from activations but must still resolve to its owner, so
+    // an action-mode tool call from it is approved in the right chat.
+    assert.equal(await bot.ownerSession('ses_child_owner'), 'ses_owner')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('stopping a delegated task aborts the child instead of waiting for it', async () => {
+  const { bot, stateDir } = await createBot({}, { taskSubagentEnabled: true })
+  try {
+    let aborted = false
+    bot.ctx.sessionController.resolveAgent = async () => ({ agent: 'agent-1' })
+    bot.subagents.current = {
+      async startActivation(spec) {
+        spec.signal.addEventListener('abort', () => { aborted = true })
+        let settle
+        const result = new Promise(resolve => { settle = resolve })
+        return {
+          childId: 'ses_child_abort',
+          result,
+          async dispose() { settle({ output: [{ type: 'text', text: 'late' }], stopReason: 'aborted' }) },
+        }
+      },
+    }
+    const pending = bot.runInSubagent('oc_1', 'ses_1', '长任务')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    bot.cancelledTasks.add('oc_1')
+    await bot.cancelTask('oc_1')
+    const outcome = await pending
+    assert.equal(outcome.status, 'cancelled')
+    assert.equal(aborted, true, 'the child signal must be aborted, not just disposed')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

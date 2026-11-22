@@ -204,6 +204,10 @@ export class FeishuBot {
   private readonly activations: Map<string, SubagentActivationLike>
   /** Conversations the user stopped while a delegated task was in flight. */
   private readonly cancelledTasks: Set<string>
+  /** Delegated child session -> the bot session that owns the conversation. */
+  private readonly childOwners: Map<string, string>
+  /** Abort handles for running delegations, so a stop cannot hang on them. */
+  private readonly taskAborts: Map<string, AbortController>
   /** Per-chat chain: a second approval waits instead of failing closed. */
   private readonly approvalQueue: Map<string, Promise<void>>
   /** `${chatId}::${senderId}` -> trust expiry after one approval. */
@@ -278,6 +282,8 @@ export class FeishuBot {
     this.cancelledTasks = new Set()
     this.requestTrust = new Map()
     this.approvalQueue = new Map()
+    this.childOwners = new Map()
+    this.taskAborts = new Map()
     this.recentSenders = new Map()
     this.senderNames = new Map()
     this.dangerPatterns = compileDenyPatterns(DEFAULT_DENY_PATTERNS)
@@ -1183,6 +1189,10 @@ export class FeishuBot {
   async ownerSession(sessionId: string): Promise<string | undefined> {
     if (this.botSessions.has(sessionId)) return sessionId
     if (this.sessionContexts.has(sessionId)) return sessionId
+    // A delegated child is the case that matters: its tool calls must be
+    // approved in the conversation that asked, not skipped.
+    const owner = this.childOwners.get(sessionId)
+    if (owner !== undefined) return owner
     const seam = this.subagentSeam()
     const rootOf = (seam as { rootOf?: (agent: unknown) => { session?: { id?: string } } } | undefined)?.rootOf
     if (typeof rootOf !== 'function') return undefined
@@ -1738,9 +1748,16 @@ export class FeishuBot {
     const read = this.ctx.sessionController.projections
     if (typeof read !== 'function') return undefined
     try {
-      const result = await read.call(this.ctx.sessionController, { sessionId }, new AbortController().signal) as
-        | { values?: Record<string, unknown> }
-        | null
+      // A hung projection read would silently disable delegation, so bound it.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 5_000)
+      timer.unref?.()
+      const result = await Promise.race([
+        read.call(this.ctx.sessionController, { sessionId }, controller.signal),
+        new Promise<null>(resolve => {
+          setTimeout(() => resolve(null), 5_000).unref?.()
+        }),
+      ]).finally(() => { clearTimeout(timer) }) as { values?: Record<string, unknown> } | null
       const values = result?.values
       if (values === undefined) return undefined
       const stats = values.sessionStats as { turns?: unknown } | undefined
@@ -1793,7 +1810,10 @@ export class FeishuBot {
         ...(this.config.agentPreset === undefined ? {} : { agentPreset: this.config.agentPreset }),
         ...(maxDepth === undefined ? {} : { maxDepth }),
       })
+      activation = await Promise.resolve(activation)
       this.activations.set(conversationKey, activation)
+      this.taskAborts.set(conversationKey, controller)
+      this.childOwners.set(activation.childId, sessionId)
       this.recordTask(conversationKey, activation.childId, 'running', previous?.summary ?? '')
       this.metrics.inc('taskDelegated')
       const result = await activation.result
@@ -1827,6 +1847,7 @@ export class FeishuBot {
     } finally {
       clearTimeout(timer)
       this.activations.delete(conversationKey)
+      this.taskAborts.delete(conversationKey)
       if (activation !== undefined) await activation.dispose().catch(() => {})
     }
   }
@@ -1865,6 +1886,8 @@ export class FeishuBot {
       updatedAt: Date.now(),
     })
     this.activations.delete(conversationKey)
+    this.taskAborts.get(conversationKey)?.abort()
+    this.taskAborts.delete(conversationKey)
     await activation.dispose().catch(() => {})
     this.metrics.inc('taskCancelled')
     return true
