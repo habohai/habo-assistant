@@ -40,10 +40,6 @@ export interface Config {
   replyInThread: boolean
   progress: boolean
   ackReaction: string
-  /** Route tables and long replies into a Feishu document. */
-  docsEnabled: boolean
-  docThresholdChars: number
-  docThresholdLines: number
   /** Delegate long tasks to a task subagent instead of growing the main Session. */
   taskSubagentEnabled: boolean
   /** Context pressure (surface tokens) above which a task is delegated. */
@@ -136,10 +132,6 @@ export function normalizeConfig(raw: unknown): Config {
     progress: value.progress !== false,
     /** Emoji reacted onto the question while it is queued; '' disables. */
     ackReaction: normalizeAckReaction(string('ackReaction', 'auto')),
-    // Opt-in: replies stay in the chat unless a document is explicitly wanted.
-    docsEnabled: value.docsEnabled === true,
-    docThresholdChars: integer('docThresholdChars', 4000, 200, 200_000),
-    docThresholdLines: integer('docThresholdLines', 60, 5, 5000),
     taskSubagentEnabled: value.taskSubagentEnabled === true,
     taskSubagentContextThreshold: integer('taskSubagentContextThreshold', 120_000, 10_000, 2_000_000),
     taskSubagentTurnThreshold: integer('taskSubagentTurnThreshold', 80, 5, 10_000),

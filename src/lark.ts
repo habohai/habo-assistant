@@ -102,8 +102,6 @@ export class LarkCli {
   private chatList: ChatSummary[] | undefined
   private chatListAt: number
   private readonly peerNames: Map<string, string>
-  /** Identities that may not create documents in this tenant; probed once. */
-  private readonly docDenied: Set<'bot' | 'user'>
 
   constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, chatListTtlMs = DEFAULT_CHAT_LIST_TTL_MS, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
@@ -121,7 +119,6 @@ export class LarkCli {
     this.chatList = undefined
     this.chatListAt = 0
     this.peerNames = new Map()
-    this.docDenied = new Set()
   }
 
   /** Resolve the executable once; a failure clears the cache for the next try. */
@@ -433,55 +430,6 @@ export class LarkCli {
       this.editSupport = false
     }
     return this.editSupport ?? false
-  }
-
-  /**
-   * Create a Feishu document from Markdown.
-   *
-   * Bot identity is preferred so the document belongs to the bot; many tenants
-   * only grant `docx:document:create` to the user token, so the user identity is
-   * a fallback. Returns undefined when neither identity may create documents.
-   */
-  async createDoc(title: string, markdown: string): Promise<{ url: string; documentId: string } | undefined> {
-    if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: create doc ${title}`)
-      return undefined
-    }
-    // The CLI takes the body as an argv value; keep it well under the platform
-    // argument limit and let the caller fall back to a message instead.
-    if (typeof markdown !== 'string' || markdown.length > 100_000) {
-      throw new Error('document body is too large for one CLI argument')
-    }
-    let lastError: unknown
-    for (const identity of ['bot', 'user'] as const) {
-      if (this.docDenied.has(identity)) continue
-      try {
-        const { stdout } = await this.run([
-          'docs', '+create',
-          '--as', identity,
-          '--title', title,
-          '--doc-format', 'markdown',
-          '--content', markdown,
-          '--json',
-        ], { timeoutMs: Math.max(this.timeoutMs, 30_000) })
-        const parsed = parseCliJson(stdout) as { data?: { document?: { document_id?: unknown; url?: unknown } } }
-        const document = parsed.data?.document
-        if (typeof document?.document_id !== 'string' || typeof document.url !== 'string') {
-          lastError = new Error('document create returned no url')
-          continue
-        }
-        return { url: document.url, documentId: document.document_id }
-      } catch (error) {
-        lastError = error
-        // A missing docx scope is a configuration gap, not a transient failure:
-        // remember it so later replies do not retry this identity every time.
-        const message = error instanceof Error ? error.message : String(error)
-        if (message.includes('99991672') || message.includes('has not applied for the required scope')) {
-          this.docDenied.add(identity)
-        }
-      }
-    }
-    throw lastError instanceof Error ? lastError : new Error('cannot create document')
   }
 
   /** Send a fresh message into a chat, choosing post for supported Markdown. */

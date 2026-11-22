@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEFAULT_REPLY_POLICY, decideReply, docSummary, hasMarkdownTable, markdownMarkers } from '../lib/index.js'
+import { decideReply, hasMarkdownTable, markdownMarkers } from '../lib/index.js'
 
 test('decideReply keeps plain text on the text transport', () => {
   const plan = decideReply('构建成功了。')
@@ -64,23 +64,3 @@ test('decideReply keeps long plain replies on the text transport', () => {
   assert.equal(decideReply(markdown).kind, 'post')
 })
 
-test('a document needs an explicit request', () => {
-  const table = '| 任务 | 状态 |\n|---|---|\n| 构建 | 通过 |'
-  assert.equal(decideReply(table, { ...DEFAULT_REPLY_POLICY, forceDoc: true }).kind, 'doc')
-  assert.equal(decideReply('普通一句话', { ...DEFAULT_REPLY_POLICY, forceDoc: true }).kind, 'doc')
-  assert.equal(decideReply(table, { ...DEFAULT_REPLY_POLICY, docsEnabled: true }).reason, 'table')
-})
-
-test('auto document routing needs the explicit switch', () => {
-  const long = 'x'.repeat(5000)
-  assert.equal(decideReply(long, { docsEnabled: false, docThresholdChars: 100, docThresholdLines: 0 }).kind, 'text')
-  assert.equal(decideReply(long, { docsEnabled: true, docThresholdChars: 9999, docThresholdLines: 0 }).kind, 'text')
-  assert.equal(decideReply(long, { docsEnabled: true, docThresholdChars: 100, docThresholdLines: 0 }).kind, 'doc')
-})
-
-test('docSummary flattens Markdown into one line', () => {
-  const summary = docSummary('## 结论\n\n- **构建**失败\n- 依赖冲突')
-  assert.equal(summary.includes('*'), false)
-  assert.equal(summary.includes('#'), false)
-  assert.ok(summary.includes('构建'))
-})

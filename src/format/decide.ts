@@ -8,10 +8,10 @@
  */
 
 /** Transport chosen for one reply. */
-export type ReplyKind = 'text' | 'post' | 'doc'
+export type ReplyKind = 'text' | 'post'
 
 /** Why a reply was routed the way it was. */
-export type ReplyReason = 'empty' | 'plain' | 'markdown' | 'table' | 'long'
+export type ReplyReason = 'empty' | 'plain' | 'markdown' | 'table'
 
 export interface ReplyPlan {
   kind: ReplyKind
@@ -24,28 +24,13 @@ export interface ReplyPlan {
   table: boolean
 }
 
-/** Thresholds and switches for document routing. */
-export interface ReplyPolicy {
-  /** Character count above which a reply becomes a document; 0 disables. */
-  docThresholdChars: number
-  /** Line count above which a reply becomes a document; 0 disables. */
-  docThresholdLines: number
-  /**
-   * Whether long/table content may become a document on its own.
-   *
-   * Off by default: a document is a deliberate deliverable, not a side effect of
-   * formatting. Replies stay in the chat unless someone asks for a document.
-   */
-  docsEnabled: boolean
-  /** Explicit request for a document, regardless of length or tables. */
-  forceDoc?: boolean
-}
-
-export const DEFAULT_REPLY_POLICY: ReplyPolicy = {
-  docThresholdChars: 4000,
-  docThresholdLines: 60,
-  docsEnabled: false,
-}
+/**
+ * Replies never create documents.
+ *
+ * A document is a deliberate deliverable with an owner, a location and an access
+ * decision; formatting must not produce one as a side effect. Everything stays
+ * in the chat until a document flow is designed.
+ */
 
 const MARKERS: Array<{ name: string; pattern: RegExp }> = [
   { name: 'bold', pattern: /\*\*[^*\n]+\*\*/ },
@@ -92,35 +77,13 @@ export function hasMarkdownTable(text: string): boolean {
  * document when documents are enabled; any other supported Markdown becomes
  * `post`; everything else stays plain `text`, Feishu's cheapest transport.
  */
-export function decideReply(text: string, policy: ReplyPolicy = DEFAULT_REPLY_POLICY): ReplyPlan {
+export function decideReply(text: string): ReplyPlan {
   const content = typeof text === 'string' ? text : ''
   if (content.trim() === '') return { kind: 'text', reason: 'empty', content, markers: [], table: false }
   const markers = markdownMarkers(content)
   const table = hasMarkdownTable(content)
-  if (policy.forceDoc === true) return { kind: 'doc', reason: 'long', content, markers, table }
-  if (policy.docsEnabled) {
-    if (table) return { kind: 'doc', reason: 'table', content, markers, table }
-    const chars = content.length
-    const lines = content.split('\n').length
-    const tooLong = (policy.docThresholdChars > 0 && chars > policy.docThresholdChars)
-      || (policy.docThresholdLines > 0 && lines > policy.docThresholdLines)
-    if (tooLong) return { kind: 'doc', reason: 'long', content, markers, table }
-  }
   // A table has no post rendering either, but plain text collapses its columns;
   // rich text at least keeps the rows apart.
   if (markers.length === 0 && !table) return { kind: 'text', reason: 'plain', content, markers, table }
-  return { kind: 'post', reason: 'markdown', content, markers, table }
-}
-
-/** One-line summary used in the chat message that links to a document. */
-export function docSummary(markdown: string, limit = 120): string {
-  const text = typeof markdown === 'string' ? markdown : ''
-  const flattened = text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+\.)\s+/gm, '')
-    .replace(/[*_~`]/g, '')
-    .replace(/\|/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return flattened.slice(0, limit)
+  return { kind: 'post', reason: table && markers.length === 0 ? 'table' : 'markdown', content, markers, table }
 }

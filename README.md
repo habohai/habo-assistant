@@ -36,7 +36,6 @@ Habo-Assistant 把 **飞书群 / 话题** 和 **DSH Session** 绑定起来：
 | 发送前校验 | `lark-cli` 群发/话题回复先校验 owner 和 bot，再认领；未授权直接拒绝 |
 | 话题选择 | 绑定弹窗选中群后，可直接选群主会话或该群的已有话题 |
 | 回复格式 | 自动在纯文本 / 富文本 post 之间选择，Markdown 不再裸露 |
-| 长文与表格 | 超过阈值或含表格时转飞书文档，群里只发摘要和链接 |
 | 确认反馈 | `ackReaction: auto` 在 OnIt / Eyes / Typing 之间按消息稳定轮换 |
 | 长任务委派 | 上下文过长时把任务交给 task subagent，主 Session 不再继续膨胀 |
 | 审批卡片 | 审批用互动卡片，点「同意 / 拒绝」即可；文字回复仍然可用 |
@@ -197,9 +196,6 @@ bots:
 | `p2pSessionTtlMs` | 30 天 | 私聊 Session 有效期 |
 | `chatListTtlMs` | 5 分钟 | 群名 / 群列表缓存 |
 | `ackReaction` | `auto` | `auto` 在 `OnIt` / `GLANCE` / `Typing` 间轮换；`none` 关闭；也可写死 emoji |
-| `docsEnabled` | `false` | 是否允许表格 / 长文自动转文档（默认关闭） |
-| `docThresholdChars` | 4000 | 超过该字数转文档 |
-| `docThresholdLines` | 60 | 超过该行数转文档 |
 | `taskSubagentEnabled` | `false` | 是否把长任务委派给 subagent |
 | `taskSubagentContextThreshold` | 120000 | 上下文 token 超过该值才委派 |
 | `taskSubagentTurnThreshold` | 80 | 轮次超过该值才委派 |
@@ -215,17 +211,11 @@ bots:
 | --- | --- |
 | 纯文本 | `text` |
 | 含加粗 / 列表 / 代码 / 链接 | `post` 富文本 |
-| Markdown 表格 | `post` 富文本（不自动建文档） |
-| 超长内容 | 按 `maxReplyChars` 分段 `post`，始终留在聊天里 |
-| 显式要求发送文档 | 飞书文档 + 摘要链接 |
-| 文档创建失败 | 回落 `post`，再回落 `text` |
+| Markdown 表格 | `post` 富文本 |
+| 超长内容 | 按 `maxReplyChars` 分段 `post` |
 
-- 默认**不会**因为表格或长度自动创建文档，避免产生一堆需要清理的文档；
-- 只有显式要求（`docsEnabled: true` 或调用方 `forceDoc`）才建文档；
+- **不会创建飞书文档**：文档需要明确的位置、权限和归属，格式化不产生文档；
 - 表格识别要求表头 + 分隔行，日志里的 `a|b` 不会误判；
-- 文档先用 bot 身份创建，缺 `docx:document:create` 权限时自动改用 user 身份；
-- 两种身份都缺权限时记住该状态，后续不再重试，直接回落消息；
-- 文档标题为「群名 · yyyy-mm-dd hh:mm」。
 
 ## 长任务委派
 

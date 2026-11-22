@@ -30,7 +30,7 @@ import type { Config } from './src/config.js'
 import type { FeishuEvent } from './src/event.js'
 import type { HostContext, Job, SessionEventLike, SessionLike, SubagentActivationLike, SubagentsLike, SubprocessHandle, WorkspaceLike } from './src/types.js'
 import { parseApprovalReply } from './src/approval.js'
-import { decideReply, docSummary } from './src/format/decide.js'
+import { decideReply } from './src/format/decide.js'
 import { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 import { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
@@ -59,10 +59,10 @@ const BACKOFF_JITTER = 0.2
 export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangerousCommand, parseApprovalReply, summarizeCommand } from './src/approval.js'
 export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
-export { decideReply, docSummary, hasMarkdownTable, markdownMarkers, DEFAULT_REPLY_POLICY } from './src/format/decide.js'
+export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
-export type { ReplyKind, ReplyPlan, ReplyPolicy, ReplyReason } from './src/format/decide.js'
+export type { ReplyKind, ReplyPlan, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
 export { SeenStore } from './src/dedup.js'
 export { acceptEvent, bindingKey, cleanMessageText, readFeishuEvent, routeThreadKey } from './src/event.js'
@@ -1254,19 +1254,6 @@ export class FeishuBot {
       }
       return
     }
-    const plan = decideReply(answer, {
-      docsEnabled: this.config.docsEnabled,
-      docThresholdChars: this.config.docThresholdChars,
-      docThresholdLines: this.config.docThresholdLines,
-    })
-    if (plan.kind === 'doc') {
-      const chunks = await this.documentChunks(event, answer, plan.reason)
-      const delivered = await this.deliver(event, await placeholder$, chunks)
-      this.metrics.inc(delivered ? 'jobsSucceeded' : 'jobsFailed')
-      this.metrics.observe('jobTotalMs', Date.now() - startedAt)
-      this.ctx.logger.info(`feishu-bot: answered chat=${event.chatId} session=${sessionId} as=doc in ${Date.now() - startedAt}ms`)
-      return
-    }
     const chunks = splitReply(answer, this.config.maxReplyChars)
     if (chunks.length === 0) {
       this.metrics.inc('jobsEmpty')
@@ -1449,46 +1436,6 @@ export class FeishuBot {
     await activation.dispose().catch(() => {})
     this.metrics.inc('taskCancelled')
     return true
-  }
-
-  /**
-   * Turn a long or tabular answer into a document plus one link message.
-   *
-   * Any failure falls back to the original text so the user always gets the
-   * answer; the document is best effort, the reply is not.
-   */
-  async documentChunks(event: FeishuEvent, answer: string, reason: string): Promise<string[]> {
-    const title = await this.docTitle(event)
-    try {
-      const created = await this.cli.createDoc(title, answer)
-      if (created !== undefined) {
-        this.metrics.inc('docCreated')
-        this.ctx.logger.info(`feishu-bot: doc ${created.documentId} for ${event.chatId} (${reason}, ${answer.length} chars)`)
-        const summary = docSummary(answer)
-        const parts = [
-          summary === '' ? '内容已整理为文档。' : `**内容已整理为文档**
-
-${summary}`,
-          `[查看完整内容](${created.url})`,
-        ]
-        return [parts.join('\n\n')]
-      }
-    } catch (error) {
-      this.metrics.inc('docFailed')
-      this.ctx.logger.warn(`feishu-bot: cannot create doc for ${event.chatId}: ${String(error)}`)
-    }
-    return splitReply(answer, this.config.maxReplyChars)
-  }
-
-  /** Document title: chat or topic name plus a 24-hour timestamp. */
-  async docTitle(event: FeishuEvent): Promise<string> {
-    const name = await this.chatName(event.chatId).catch(() => undefined)
-    const stamp = new Date().toLocaleString([], {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23',
-    })
-    const base = typeof name === 'string' && name !== '' ? name : event.chatId.slice(-8)
-    return `${base} · ${stamp}`
   }
 
   /** Immediate acknowledgement: a reply the final answer later replaces. */
