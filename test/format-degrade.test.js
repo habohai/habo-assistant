@@ -75,3 +75,36 @@ test('idempotency keys are stable per send and distinct across sends', () => {
   assert.equal(a, b)
   assert.notEqual(a, c)
 })
+
+test('missing app scopes are recorded from real failures', async () => {
+  const payload = JSON.stringify({
+    ok: false,
+    error: {
+      code: 99991672,
+      message: 'access denied: app has not applied for the required scope(s): im:chat:readonly, im:chat.members:read',
+      missing_scopes: ['im:chat:readonly', 'im:chat.members:read'],
+    },
+  })
+  const ctx = {
+    logger: { info() {}, warn() {}, debug() {}, error() {} },
+    subprocess: {
+      async resolveExecutable() { return 'lark-cli' },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: payload }) },
+            stderr: { readFrom: () => ({ text: '' }) },
+          },
+          terminate() {},
+        }
+      },
+    },
+  }
+  const cli = new LarkCli(ctx, { cwd: '/tmp' })
+  await cli.run(['im', '+chat-members-list'])
+  const scopes = cli.scopeReport().map(entry => entry.scope)
+  assert.ok(scopes.includes('im:chat:readonly'), `scopes: ${scopes.join(',')}`)
+  assert.ok(scopes.includes('im:chat.members:read'))
+  assert.ok(cli.scopeReport().every(entry => entry.command.startsWith('im +chat-members-list')))
+})

@@ -118,6 +118,8 @@ export class LarkCli {
   private chatList: ChatSummary[] | undefined
   private chatListAt: number
   private readonly peerNames: Map<string, string>
+  /** Scopes this app is missing, learned from real failures. */
+  private readonly missingScopes: Map<string, { at: number; command: string }>
 
   constructor(ctx: LarkContext, { name = 'lark-cli', profile, cwd, timeoutMs = 15_000, chatListTtlMs = DEFAULT_CHAT_LIST_TTL_MS, dryRun = false, logger }: LarkOptions) {
     this.ctx = ctx
@@ -135,9 +137,31 @@ export class LarkCli {
     this.chatList = undefined
     this.chatListAt = 0
     this.peerNames = new Map()
+    this.missingScopes = new Map()
   }
 
   /** Resolve the executable once; a failure clears the cache for the next try. */
+  /** Remember which scopes this app lacks, so the UI can say so instead of guessing. */
+  private recordScopeError(payload: string, args: string[]): void {
+    const scopes = [...payload.matchAll(/"([a-z][a-z0-9_.]*:[a-z0-9_.:]+)"/g)]
+      .map(match => match[1] as string)
+      .filter(scope => scope.includes(':'))
+    if (scopes.length === 0 && !payload.includes('99991672')) return
+    const command = args.slice(0, 3).join(' ')
+    for (const scope of new Set(scopes)) {
+      if (this.missingScopes.has(scope)) continue
+      this.missingScopes.set(scope, { at: Date.now(), command })
+      this.logger?.warn?.(`feishu-bot: app is missing scope "${scope}" (needed by ${command})`)
+    }
+  }
+
+  /** Scopes this app is known to be missing, from actual failures. */
+  scopeReport(): Array<{ scope: string; command: string; at: number }> {
+    return [...this.missingScopes.entries()]
+      .map(([scope, value]) => ({ scope, command: value.command, at: value.at }))
+      .sort((a, b) => a.scope.localeCompare(b.scope))
+  }
+
   async resolve(): Promise<string> {
     if (this.executable !== undefined) return this.executable
     if (this.resolving !== undefined) return this.resolving
@@ -187,10 +211,15 @@ export class LarkCli {
       const stdout = handle.collected?.stdout?.readFrom(0).text ?? ''
       const stderr = handle.collected?.stderr?.readFrom(0).text ?? ''
       if (outcome.exitCode !== 0) {
+        this.recordScopeError(stderr, args)
         throw Object.assign(
           new Error(`lark-cli ${args.slice(0, 3).join(' ')} failed (${outcome.exitCode}): ${stderr.slice(0, 500)}`),
           { code: 'CLI_FAILED', stderr },
         )
+      }
+      // lark-cli exits 0 for some API-level failures; the payload names the scope.
+      if (stdout.includes('99991672') || stdout.includes('has not applied for the required scope')) {
+        this.recordScopeError(stdout, args)
       }
       return { stdout, stderr }
     } finally {

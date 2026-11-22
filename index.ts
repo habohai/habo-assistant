@@ -192,6 +192,13 @@ export class FeishuBot {
   private readonly cancelledTasks: Set<string>
   /** `${chatId}::${senderId}` -> trust expiry after one approval. */
   private readonly requestTrust: Map<string, number>
+  /**
+   * Who has addressed this bot recently, keyed by chat.
+   *
+   * Feishu `open_id` is scoped to the app, so the same person has a different id
+   * under each bot; this is the only reliable way to fill `approveUsers` per bot.
+   */
+  private readonly recentSenders: Map<string, { senderId: string; senderName: string; at: number }>
   private readonly privateTitles: Map<string, string>
   private readonly manualPrivateTitles: Set<string>
   private readonly botNames: ReadonlyMap<string, string>
@@ -248,6 +255,7 @@ export class FeishuBot {
     this.activations = new Map()
     this.cancelledTasks = new Set()
     this.requestTrust = new Map()
+    this.recentSenders = new Map()
     this.privateTitles = new Map()
     this.manualPrivateTitles = new Set()
     this.botNames = services.botNames ?? new Map([[botId, config.botName]])
@@ -552,6 +560,7 @@ export class FeishuBot {
         this.ctx.logger.warn(`feishu-bot: cannot remember p2p chat ${event.chatId}: ${String(error)}`)
       })
     }
+    this.rememberSender(event)
     if (text === '') {
       this.metrics.inc('emptyQuestion')
       this.fireReply(event, '请描述你的问题。')
@@ -571,6 +580,33 @@ export class FeishuBot {
     }
     this.metrics.inc('jobsQueued')
     this.acknowledge(event)
+  }
+
+  /** Keep the latest sender per chat so approvers can be configured per bot. */
+  private rememberSender(event: FeishuEvent): void {
+    if (event.senderType !== 'user' || event.senderId === '') return
+    const previous = this.recentSenders.get(event.chatId)
+    this.recentSenders.set(event.chatId, {
+      senderId: event.senderId,
+      senderName: previous?.senderName ?? '',
+      at: Date.now(),
+    })
+    if (this.recentSenders.size > 50) {
+      const oldest = [...this.recentSenders.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+      if (oldest !== undefined) this.recentSenders.delete(oldest[0])
+    }
+  }
+
+  /** Recent senders per chat, for filling `approveUsers` with the right ids. */
+  senderReport(): Array<{ chatId: string; senderId: string; at: number; approver: boolean }> {
+    return [...this.recentSenders.entries()]
+      .sort((a, b) => b[1].at - a[1].at)
+      .map(([chatId, value]) => ({
+        chatId,
+        senderId: value.senderId,
+        at: value.at,
+        approver: this.config.approveUsers.includes(value.senderId),
+      }))
   }
 
   /** Whether this request must be approved before the bot acts on it. */
@@ -1097,6 +1133,7 @@ export class FeishuBot {
       tasks: this.tasks.size,
       trusted: this.requestTrust.size,
       taskBackend: this.taskBackendStatus(),
+      missingScopes: this.cli.scopeReport().map(entry => entry.scope),
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
       bot: {
@@ -2033,6 +2070,15 @@ export class BotHost {
     await Promise.all(this.bots.map(bot => bot.dispose()))
   }
 
+  /** Recent senders of every bot, for configuring per-bot approvers. */
+  senderReport(): Array<Record<string, unknown>> {
+    return this.bots.flatMap(bot => bot.senderReport().map(row => ({
+      bot: bot.config.botName,
+      botId: bot.config.botId,
+      ...row,
+    })))
+  }
+
   status(): Record<string, unknown> {
     const statuses = this.bots.map(bot => ({ bot, status: bot.status() }))
     const primary = statuses[0]
@@ -2048,6 +2094,7 @@ export class BotHost {
         ready: status.ready,
         consumer: status.consumer,
         lastEventAt: status.lastEventAt,
+        missingScopes: status.missingScopes,
       })),
     }
   }
@@ -2494,6 +2541,10 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
   if (method === 'GET') {
     if (url.searchParams.get('action') === 'health') {
       sendJson(res, 200, { ok: true, value: bot.status() })
+      return
+    }
+    if (url.searchParams.get('action') === 'senders') {
+      sendJson(res, 200, { ok: true, value: { senders: bot.senderReport() } })
       return
     }
     if (url.searchParams.get('action') === 'chats') {
