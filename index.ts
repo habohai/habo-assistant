@@ -210,6 +210,8 @@ export class FeishuBot {
    * under each bot; this is the only reliable way to fill `approveUsers` per bot.
    */
   private readonly recentSenders: Map<string, { senderId: string; senderName: string; at: number }>
+  /** Which identity can list group members: bot, the signed-in user, or none. */
+  private memberListing: 'bot' | 'user' | 'none' | undefined
   /** open_id -> display name, so the prompt can name the asker. */
   private readonly senderNames: Map<string, string>
   private readonly privateTitles: Map<string, string>
@@ -624,6 +626,7 @@ export class FeishuBot {
     const chatId = this.registry.entries()[0]?.[1]?.chatId
     if (chatId === undefined) return
     const probe = await this.cli.probeMemberScope(chatId)
+    this.memberListing = probe.ok ? (probe.identity ?? 'none') : 'none'
     if (probe.ok) {
       this.ctx.logger.info(`feishu-bot: member listing available as ${String(probe.identity)} for "${this.config.botName}"`)
       return
@@ -652,6 +655,17 @@ export class FeishuBot {
     const recent = this.recentSenders.get(event.chatId)
     if (recent !== undefined && recent.senderId === event.senderId) recent.senderName = name
     return `${name}(${event.senderId})`
+  }
+
+  /** What this bot can actually do, rather than which scope is missing. */
+  capabilities(): { memberListing: 'bot' | 'user' | 'none' | 'unknown' } {
+    return { memberListing: this.memberListing ?? 'unknown' }
+  }
+
+  /** Scopes that matter for a missing capability; empty when everything works. */
+  blockingScopes(): string[] {
+    if (this.memberListing === undefined || this.memberListing !== 'none') return []
+    return this.cli.scopeReport().map(entry => entry.scope)
   }
 
   /** Recent senders per chat, for filling `approveUsers` with the right ids. */
@@ -1200,7 +1214,8 @@ export class FeishuBot {
       tasks: this.tasks.size,
       trusted: this.requestTrust.size,
       taskBackend: this.taskBackendStatus(),
-      missingScopes: this.cli.scopeReport().map(entry => entry.scope),
+      memberListing: this.capabilities().memberListing,
+      missingScopes: this.blockingScopes(),
       permissionPreset: this.config.permissionPreset,
       queue: this.queue.stats(),
       bot: {
@@ -2162,6 +2177,7 @@ export class BotHost {
         ready: status.ready,
         consumer: status.consumer,
         lastEventAt: status.lastEventAt,
+        memberListing: status.memberListing,
         missingScopes: status.missingScopes,
       })),
     }
