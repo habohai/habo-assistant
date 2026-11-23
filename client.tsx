@@ -67,9 +67,11 @@ const TAB_ID = 'feishu-tasks'
 const TAB_KIND = 'feishu-tasks'
 
 const zh: Record<string, string> = {
-  tab: '飞书任务',
+  // Short enough to render fully in the narrow tab strip; the guide uses the
+  // same key so the two entry points cannot disagree.
+  tab: '任务',
   guideDescription: '查看飞书群机器人当前处理中、待审批和最近完成的会话，点击直达会话。',
-  emptyTitle: '暂无飞书任务',
+  emptyTitle: '暂无任务',
   emptyHint: '群里 @ 机器人后，这里会出现它的会话。',
   summaryActive: '思考中 {running}，待审批 {approval}',
   summaryIdle: '当前没有运行中的任务',
@@ -88,9 +90,9 @@ const zh: Record<string, string> = {
 }
 
 const en: Record<string, string> = {
-  tab: 'Feishu tasks',
+  tab: 'Tasks',
   guideDescription: 'Running, approval-blocked, and recently finished Feishu group sessions; click one to open it.',
-  emptyTitle: 'No Feishu tasks',
+  emptyTitle: 'No tasks',
   emptyHint: 'Mention the bot in a group and its session shows up here.',
   summaryActive: '{running} thinking, {approval} awaiting approval',
   summaryIdle: 'No task is running',
@@ -237,7 +239,9 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         @media (hover: hover) { .ft-row:hover { background: var(--dsw-alias-interactive-bg-hover); } }
         .ft-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); }
         .ft-status { flex: none; width: 14px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
-        .ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
+        .ft-tab-title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.ft-tab-title svg { flex: none; }
+.ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
         .ft-status-dot.running { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-dot-breathe 3.4s ease-in-out infinite; }
         .ft-status-dot.approval { background: var(--dsw-alias-state-warning-primary, #D97706); }
         @keyframes ft-dot-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
@@ -328,7 +332,13 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
 
 function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS.ReactElement {
   const { tab } = useTabInfo()
-  return <>{TasksMark({ size: 16 })}{tab.title}</>
+  // The icon must not shrink or push the label: the strip gives a fixed width.
+  return (
+    <span className="ft-tab-title">
+      {TasksMark({ size: 16 })}
+      {tab.title}
+    </span>
+  )
 }
 
 ;(window as unknown as { __ModuleLoader__: { load(definition: { id: string; factory(require: (id: string) => unknown): unknown }): void } }).__ModuleLoader__.load({
