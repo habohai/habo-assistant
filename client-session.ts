@@ -182,7 +182,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     /** Simplified Chinese copy (the key-set source of truth). */
     const zh = {
       typeLabel: '会话信息',
-      guideTitle: '会话信息',
       guideDescription: '本会话绑定的飞书群与机器人，以及文件和飞书云文档；可在这里绑定新群',
       scopeLabel: '本会话',
       loading: '正在读取本会话产物…',
@@ -276,7 +275,6 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
     /** English copy (same key set). */
     const en = {
       typeLabel: 'Session info',
-      guideTitle: 'Session info',
       guideDescription: 'Feishu groups and bot bound to this session, plus files and Feishu docs; bind a group here',
       scopeLabel: 'This session',
       loading: 'Reading this session’s artifacts…',
@@ -1576,7 +1574,8 @@ export function createSessionInfoPlugin(React: typeof ReactNS, h: any): { inject
         guide: [{
           id: 'session-artifacts',
           order: 25,
-          title: () => t('guideTitle'),
+          // Same string as the tab: one page, one name.
+          title: () => t('typeLabel'),
           description: () => t('guideDescription'),
           icon: ArtifactsChipIcon,
         }],
