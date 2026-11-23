@@ -68,8 +68,6 @@ const TAB_KIND = 'feishu-tasks'
 
 const zh: Record<string, string> = {
   tab: '飞书任务',
-  tabShort: '任务',
-  guideTitle: '飞书任务',
   guideDescription: '查看飞书群机器人当前处理中、待审批和最近完成的会话，点击直达会话。',
   emptyTitle: '暂无飞书任务',
   emptyHint: '群里 @ 机器人后，这里会出现它的会话。',
@@ -91,8 +89,6 @@ const zh: Record<string, string> = {
 
 const en: Record<string, string> = {
   tab: 'Feishu tasks',
-  tabShort: 'Tasks',
-  guideTitle: 'Feishu tasks',
   guideDescription: 'Running, approval-blocked, and recently finished Feishu group sessions; click one to open it.',
   emptyTitle: 'No Feishu tasks',
   emptyHint: 'Mention the bot in a group and its session shows up here.',
@@ -352,11 +348,12 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
         id: TAB_ID,
         kind: TAB_KIND,
         priority: 'builtin',
-        title: () => t('tabShort'),
+        // One name everywhere: the sidebar tab and the start-page guide must match.
+        title: () => t('tab'),
         guide: [{
           id: 'feishu-tasks',
           order: 26,
-          title: () => t('guideTitle'),
+          title: () => t('tab'),
           description: () => t('guideDescription'),
           icon: (props: { size?: number }) => TasksMark({ size: props.size ?? 18 }),
         }],
