@@ -108,6 +108,14 @@ export interface Config {
   permissionPreset: string
   autoEnableApproverChats: boolean
   approvalTimeoutMs: number
+  /**
+   * How long a request approval stays open.
+   *
+   * People read a group chat on their own schedule: two minutes is far too short
+   * for "someone else asked, you decide", while a tool approval blocks a running
+   * turn and wants a shorter leash.
+   */
+  requestApprovalTimeoutMs: number
   /** A direct (p2p) binding older than this starts a fresh Session. */
   p2pSessionTtlMs: number
   approveUsers: string[]
@@ -126,6 +134,7 @@ export const DEFAULTS = {
   readyTimeoutMs: 30_000,
   statsIntervalMs: 5 * 60 * 1000,
   approvalTimeoutMs: 2 * 60 * 1000,
+  requestApprovalTimeoutMs: 10 * 60 * 1000,
   p2pSessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   chatListTtlMs: 5 * 60 * 1000,
   topicContext: 'summary' as const,
@@ -204,6 +213,7 @@ export function normalizeConfig(raw: unknown): Config {
     permissionPreset: string('permissionPreset'),
     autoEnableApproverChats: value.autoEnableApproverChats !== false && value.autoEnableOwnerChats !== false,
     approvalTimeoutMs: integer('approvalTimeoutMs', DEFAULTS.approvalTimeoutMs, 10_000, 30 * 60 * 1000),
+    requestApprovalTimeoutMs: integer('requestApprovalTimeoutMs', DEFAULTS.requestApprovalTimeoutMs, 30_000, 2 * 60 * 60 * 1000),
     p2pSessionTtlMs: integer('p2pSessionTtlMs', DEFAULTS.p2pSessionTtlMs, 60_000, 365 * 24 * 60 * 60 * 1000),
     chatListTtlMs: integer('chatListTtlMs', DEFAULTS.chatListTtlMs, 10_000, 24 * 60 * 60 * 1000),
     /** Approver open_ids; empty means any member of the chat may answer. */

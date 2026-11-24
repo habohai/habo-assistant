@@ -198,6 +198,8 @@ bots:
 | `ackReaction` | `auto` | `auto` 在 `OnIt` / `GLANCE` / `Typing` 间轮换；`none` 关闭；也可写死 emoji |
 | `requestApproval` | `non-owner` | 谁的请求需要你批准：`non-owner` / `all` / `off` |
 | `requestTrustMs` | 30 分钟 | 一次同意后该人在该群的免审时长；`0` 关闭 |
+| `requestApprovalTimeoutMs` | 10 分钟 | 请求级审批的等待时长（人有自己的节奏） |
+| `approvalTimeoutMs` | 2 分钟 | 工具级审批的等待时长（正在阻塞一轮对话） |
 | `delegateGuidance` | 内置一句 | 指导模型何时用 `subagent` 委派；空 = 不提示 |
 | `mentionPolicy` | `all` | 一条消息 @ 多个机器人时：`all` 都答，`first` 只让第一个答 |
 | `approvalMode` | `request` | 审批发生在 `request`（消息）/ `action`（动作）/ `off` |
@@ -274,6 +276,14 @@ delegateGuidance: ''   # 空 = 不提示；默认给一句「多步工具/长检
 
 - `提问人` 优先显示真实姓名（取自消息接口的 `sender_name`，不需要通讯录权限），查不到时退回 open_id；
 - 姓名按人缓存，不会每条消息都查一次。
+
+### 发送前的清理
+
+模型偶尔会用中文引号写 `@`，或者把 `<at>` 放进富文本，飞书会因此渲染成 `[Invalid rich text JSON]` 或干脆不 @ 到人。发送前统一处理：
+
+- `<at user_id=“ou_…”>` → 直引号（否则飞书不认）；
+- 富文本消息里的 `<at>` → `@名字`（post 类型不支持 mention 语法）；
+- 丢弃控制字符（会让 post 消息体非法）。
 
 ## 审批：谁能驱动机器人
 

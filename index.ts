@@ -63,6 +63,7 @@ export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { MUTATING_TOOLS, READ_ONLY_TOOLS, describeToolCall, isMutatingTool } from './src/action.js'
 export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
+export { normalizeMentions, sanitizeForPost } from './src/format/sanitize.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 export { idempotencyKey } from './src/lark.js'
 export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
@@ -1013,7 +1014,10 @@ export class FeishuBot {
     // signal that already fired, where `addEventListener` would never run.
     if (request.signal?.aborted) return 'cancelled'
     const reason = firstNonEmpty(request?.displayReason, request?.reason, '执行命令')
-    const seconds = Math.round(this.config.approvalTimeoutMs / 1000)
+    // A request waits for a human to notice a group message; a tool approval is
+    // blocking a live turn, so the two keep different budgets.
+    const timeoutMs = kind === 'request' ? this.config.requestApprovalTimeoutMs : this.config.approvalTimeoutMs
+    const seconds = Math.round(timeoutMs / 1000)
     // Feishu de-duplicates a send by its idempotency key for about an hour, so
     // the key must identify this approval, not just the chat.
     const approvalId = `ap_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -1033,7 +1037,7 @@ export class FeishuBot {
           'expired',
           kind === 'request' ? '⏰ 审批超时，该请求已作废。' : '⏰ 审批超时，该命令没有执行。',
         )
-      }, this.config.approvalTimeoutMs)
+      }, timeoutMs)
       entry.timer.unref?.()
       const signal = request?.signal
       if (signal !== undefined && typeof signal.addEventListener === 'function') {

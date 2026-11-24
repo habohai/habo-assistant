@@ -256,6 +256,7 @@ test('an unanswered tool approval expires', async () => {
   const keepAlive = setInterval(() => {}, 50)
   try {
     bot.config.approvalTimeoutMs = 20
+    bot.config.requestApprovalTimeoutMs = 20
     bot.trackSession('ses_1', 'oc_1')
     bot.installApprovalGate()
     const answerer = listeners.get('approval/request')
@@ -653,6 +654,7 @@ test('a request approval that expires sends one notice, not two', async () => {
   const keepAlive = setInterval(() => {}, 50)
   try {
     bot.config.approvalTimeoutMs = 20
+    bot.config.requestApprovalTimeoutMs = 20
     const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_to', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '做点事' }
     const gated = bot.gateRequest(event, '做点事')
     await waitFor(() => bot.approvals.has('oc_1'))
@@ -673,6 +675,7 @@ test('a timeout is reported to DSH as unavailable, never as an unknown outcome',
   const keepAlive = setInterval(() => {}, 50)
   try {
     bot.config.approvalTimeoutMs = 20
+    bot.config.requestApprovalTimeoutMs = 20
     bot.trackSession('ses_1', 'oc_1')
     const outcome = await bot.answerApproval(
       { agent: { session: { id: 'ses_1' } }, toolName: 'bash', reason: '命令审批：ls', signal: new AbortController().signal },
