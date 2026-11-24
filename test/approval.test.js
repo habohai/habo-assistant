@@ -822,3 +822,48 @@ test('action mode takes over from request mode instead of stacking', async () =>
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('approving a request sends no extra note, only the answer', async () => {
+  const { bot, stateDir, spawned } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.sessionContexts.set('ses_1', { chatId: 'oc_1', threadId: '', messageId: 'om_1', senderId: 'ou_owner' })
+    const event = { chatId: 'oc_1', chatType: 'group', messageId: 'om_ask', threadKey: '', senderType: 'user', senderId: 'ou_guest', messageType: 'text', mentions: [{ id: 'ou_bot' }], content: '做点事' }
+    const gated = bot.gateRequest(event, '做点事')
+    await waitFor(() => bot.approvals.has('oc_1'))
+    const before = spawned.filter(request => request.argv.includes('+messages-reply')).length
+    // The approver must be the configured one, not the default test sender.
+    bot.onEventLine(approvalReply('同意', 'ou_owner'))
+    await gated
+    const replies = spawned.filter(request => request.argv.includes('+messages-reply')).slice(before)
+    // No "✅ 已批准" note: the queued answer is the only bot message.
+    assert.equal(replies.length, 0, `unexpected note: ${replies.map(r => r.argv.join(' ')).join(' | ')}`)
+    assert.equal(bot.queue.isIdle(), false, 'the approved request still runs')
+    assert.equal(bot.isTrusted('oc_1', 'ou_guest'), true)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('approving a tool still says so, because no answer follows', async () => {
+  const { bot, stateDir, spawned, listeners } = await createBot({ approveUsers: ['ou_owner'] })
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    bot.installApprovalGate()
+    const answerer = listeners.get('approval/request')
+    const pending = answerer({ agent: { session: { id: 'ses_1' } }, toolName: 'bash', reason: '命令审批：ls', signal: new AbortController().signal }, () => Promise.resolve('unavailable'))
+    await waitFor(() => bot.approvals.has('oc_1'))
+    bot.onEventLine(approvalReply('同意', 'ou_owner'))
+    assert.equal(await pending, 'allowed-once')
+    const notes = spawned
+      .filter(request => request.argv.includes('+messages-reply') || request.argv.includes('+messages-send'))
+      .map(request => request.argv[request.argv.indexOf('--text') + 1] ?? '')
+      .filter(text => text.includes('已批准'))
+    assert.equal(notes.length, 1)
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

@@ -406,10 +406,15 @@ export class FeishuBot {
     }
     this.metrics.inc(action.decision === 'allow' ? 'approvalAllowed' : 'approvalRejected')
     const outcome = action.decision === 'allow' ? 'allowed-once' : 'rejected'
-    const note = action.decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。'
+    // A request approval is followed by the answer itself; a note would be a
+    // second message for one interaction.
+    const note = entry.kind === 'tool'
+      ? (action.decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。')
+      : undefined
     this.settleApproval(action.chatId, outcome, note)
     if (action.token !== undefined) {
-      void this.cli.updateCard(action.token, approvalResultCard(outcome, note)).catch(error => {
+      const cardNote = note ?? (outcome === 'allowed-once' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。')
+      void this.cli.updateCard(action.token, approvalResultCard(outcome, cardNote)).catch(error => {
         this.ctx.logger.debug(`feishu-bot: cannot update approval card: ${String(error)}`)
       })
     }
@@ -1588,10 +1593,16 @@ export class FeishuBot {
       return true
     }
     this.metrics.inc(decision === 'allow' ? 'approvalAllowed' : 'approvalRejected')
+    const entry = this.approvals.get(event.chatId)
+    // Request approvals end with the answer; only tool approvals need a note, or
+    // one "同意" would produce two bot messages.
+    const note = entry?.kind === 'tool'
+      ? (decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。')
+      : undefined
     this.settleApproval(
       event.chatId,
       decision === 'allow' ? 'allowed-once' : 'rejected',
-      decision === 'allow' ? '✅ 已批准，继续执行。' : '已拒绝，该命令没有执行。',
+      note,
     )
     return true
   }
