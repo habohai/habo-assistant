@@ -121,7 +121,7 @@ test('an accepted message gets an immediate placeholder that becomes the answer'
     // The answer replaced the placeholder instead of adding another message.
     assert.equal(replies.length, 1)
 
-    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题。 | 委派指引:需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:ou_1]\n帮我看下构建为什么失败')
+    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。 | 委派指引:需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:ou_1]\n帮我看下构建为什么失败')
     assert.equal(bot.metrics.snapshot().counts.jobsSucceeded, 1)
   } finally {
     await bot.dispose()
@@ -161,9 +161,14 @@ test('an edit failure withdraws the placeholder and falls back to a reply', asyn
     finishTurn(bot, '最终答案')
     await bot.queue.idle()
 
+    // The placeholder is whichever message the placeholder reply returned; the
+    // reaction call now shares the same fake source of ids.
+    const placeholder = findCalls(spawned, '+messages-reply')
+      .find(request => flagValue(request.argv, '--idempotency-key') === idempotencyKey('feishu-reply', 'om_1', 'ack'))
+    assert.ok(placeholder, 'the placeholder reply must have been sent')
     const deletes = findCalls(spawned, 'delete')
     assert.equal(deletes.length, 1)
-    assert.match(flagValue(deletes[0].argv, '--params'), /om_sent_1/)
+    assert.match(flagValue(deletes[0].argv, '--params'), /om_sent_\d+/)
 
     const replies = findCalls(spawned, '+messages-reply')
       .filter(request => flagValue(request.argv, '--idempotency-key') === idempotencyKey('feishu-reply', 'om_1', '0'))

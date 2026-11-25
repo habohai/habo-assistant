@@ -515,15 +515,20 @@ export class LarkCli {
   }
 
   /** Replace the text of a message the bot sent. */
-  async edit(messageId: string, text: string): Promise<boolean> { 
+  async edit(messageId: string, text: string): Promise<boolean> {
+    // lark-cli >= 1.0.100 can edit into a rich-text message, so the placeholder
+    // must use the same transport decision as a fresh reply; plain `--text`
+    // would leave Markdown markers visible.
+    const plan = decideReply(text)
+    const body = plan.kind === 'post' ? sanitizeForPost(normalizeMentions(text, 'post')) : normalizeMentions(text, 'text')
     if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: edit ${messageId}: ${text}`)
+      this.logger?.info(`feishu-bot[dry-run]: edit ${messageId} as ${plan.kind}: ${body}`)
       return true
     }
     await this.run([
       'im', '+messages-edit',
       '--message-id', messageId,
-      '--text', text,
+      ...(plan.kind === 'post' ? ['--markdown', body] : ['--text', body]),
       '--as', 'bot',
     ])
     return true

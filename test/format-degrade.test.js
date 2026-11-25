@@ -138,3 +138,17 @@ test('member listing falls back from bot to user identity before failing', async
   assert.deepEqual(probe, { ok: true, identity: 'user' })
   assert.equal(calls.length, 2, 'bot identity is tried first, then user')
 })
+
+test('the placeholder edit uses rich text when the answer has Markdown', async () => {
+  const { cli, calls } = harness(0)
+  await cli.edit('om_1', '**结论**：通过')
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].includes('--markdown'), 'a Markdown answer must not be edited as plain text')
+  assert.equal(calls[0].includes('--text'), false)
+})
+
+test('the placeholder edit stays plain for plain answers', async () => {
+  const { cli, calls } = harness(0)
+  await cli.edit('om_1', '收到')
+  assert.ok(calls[0].includes('--text'))
+})

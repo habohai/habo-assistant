@@ -815,7 +815,8 @@ export class FeishuBot {
    */
   acknowledge(event: FeishuEvent): void {
     if (this.config.ackReaction === '' || this.reactionOff) return
-    if (this.shouldPlaceholder()) return
+    // The reaction is the only sub-second signal; a placeholder arrives later and
+    // may be edited away, so both are used even when editing is available.
     const emoji = pickAckReaction(this.config.ackReaction, event.messageId)
     if (emoji === '') return
     const startedAt = Date.now()

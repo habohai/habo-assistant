@@ -127,7 +127,7 @@ export interface Config {
 export const DEFAULTS = {
   timeoutMs: 10 * 60 * 1000,
   maxReplyChars: 3500,
-  replyGuidelines: '使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题。',
+  replyGuidelines: '使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。',
   maxConcurrent: 4,
   maxQueue: 20,
   cliTimeoutMs: 15_000,
