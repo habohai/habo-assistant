@@ -97,6 +97,11 @@ const zh: Record<string, string> = {
   sendToGroupUndo: '撤销',
   sendToGroupFailed: '发送失败：{error}',
   sendToGroupTopic: '{name} · 话题',
+  sendToGroupRead: '读',
+  sendToGroupRowSend: '把上一条回答发到这个群',
+  sendToGroupRowRead: '读这个群最近的消息',
+  sendToGroupReadDone: '已开始读 {name}',
+  sendToGroupReadManual: '当前输入框不支持提交，请直接说「读一下 XX 群」',
 }
 
 const en: Record<string, string> = {
@@ -385,6 +390,10 @@ const COMPOSER_CSS = `
 .ft-send-menu-title { padding: 8px 10px 6px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
 .ft-send-menu-item { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 32px; color: var(--dsw-alias-label-primary, #1F2329); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
+.ft-send-menu-row { display: flex; align-items: center; gap: 2px; }
+.ft-send-menu-row .ft-send-menu-item { flex: 1 1 auto; min-width: 0; }
+.ft-send-menu-read { flex: none; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8A8F98); cursor: pointer; }
+.ft-send-menu-read:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
 .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-business-primary, #3370FF); font-size: 12px; cursor: pointer; }
 .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
@@ -495,6 +504,25 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     return () => clearTimeout(timer)
   }, [note])
 
+  async function read(target: SendTarget): Promise<void> {
+    if (busy || targets === null) return
+    setBusy(true)
+    setOpen(false)
+    setNote(null)
+    if (typeof inputActions.submit !== 'function') {
+      setBusy(false)
+      setNote({ text: t('sendToGroupReadManual') })
+      return
+    }
+    const previous = draft
+    inputActions.setDraft(`用 feishu_read_chat 读一下飞书群「${target.label}」最近 20 条消息，结合当前会话的上下文分析，把要点告诉我；需要我在群里回的话再问我。`)
+    window.setTimeout(() => {
+      inputActions.submit?.()
+      setBusy(false)
+      setNote({ text: t('sendToGroupReadDone', { name: target.label }), previous })
+    }, 30)
+  }
+
   async function send(target: SendTarget): Promise<void> {
     if (busy || blocked !== '' || targets === null) return
     setBusy(true)
@@ -562,16 +590,27 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         <div className="ft-send-menu" role="listbox" aria-label={t('sendToGroupPick')}>
           <div className="ft-send-menu-title">{t('sendToGroupPick')}</div>
           {(targets ?? []).map(target => (
-            <button
-              key={target.key}
-              type="button"
-              role="option"
-              className="ft-send-menu-item"
-              disabled={busy}
-              onClick={() => { void send(target) }}
-            >
-              {target.label}
-            </button>
+            <div key={target.key} className="ft-send-menu-row">
+              <button
+                type="button"
+                role="option"
+                className="ft-send-menu-item"
+                title={t('sendToGroupRowSend')}
+                disabled={busy}
+                onClick={() => { void send(target) }}
+              >
+                {target.label}
+              </button>
+              <button
+                type="button"
+                className="ft-send-menu-read"
+                title={t('sendToGroupRowRead')}
+                disabled={busy}
+                onClick={() => { void read(target) }}
+              >
+                {t('sendToGroupRead')}
+              </button>
+            </div>
           ))}
         </div>
       ) : null}
