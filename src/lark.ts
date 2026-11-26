@@ -429,12 +429,19 @@ export class LarkCli {
           text: messageText(message),
           threadId: typeof message.thread_id === 'string' ? message.thread_id : '',
         })).filter(row => row.messageId !== '' && row.text !== '')
+        // A bot without message-read scope can return success with no rows;
+        // that is not proof the group is empty, so fall through to the user.
+        if (rows.length === 0) {
+          lastError = new Error('EMPTY_PAGE')
+          continue
+        }
         // Newest first from the CLI; the caller reads oldest → newest.
         return rows.reverse()
       } catch (error) {
         lastError = error
       }
     }
+    if (lastError instanceof Error && lastError.message === 'EMPTY_PAGE') return []
     throw lastError instanceof Error ? lastError : new Error('cannot read recent messages')
   }
 
