@@ -87,10 +87,10 @@ const zh: Record<string, string> = {
   open: '打开会话',
   questionFallback: '（无问题文本）',
   sendToGroup: '飞书',
-  sendToGroupHint: '让模型把这件事发到本会话绑定的群',
+  sendToGroupHint: '把最近一条回答发到本会话绑定的群',
   sendToGroupEmpty: '先把要发的话写进输入框',
   sendToGroupAttachments: '暂只支持文本，请先移除附件',
-  sendToGroupPick: '让模型发到',
+  sendToGroupPick: '把回答发到',
   sendToGroupNone: '本会话还没有绑定群',
   sendToGroupSending: '发送中…',
   sendToGroupDone: '已发送到 {name}',
@@ -251,18 +251,6 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-status { flex: none; width: 14px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
         .ft-tab-title { display: inline-flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
 .ft-tab-title svg { flex: none; }
-      .ft-composer-send { position: relative; display: inline-flex; align-items: center; }
-      .ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-text-tertiary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
-      .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-primary, #3370FF); }
-      .ft-send-button:disabled { opacity: .38; cursor: default; }
-      .ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; min-width: 200px; max-width: 280px; max-height: 280px; overflow: auto; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 32px rgba(15,23,42,.16); }
-      .ft-send-menu-title { padding: 6px 10px 8px; font-size: 11px; letter-spacing: .02em; color: var(--dsw-alias-text-tertiary, #8A8F98); }
-      .ft-send-menu-item { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 1.4; color: var(--dsw-alias-text-primary, #1F2329); cursor: pointer; }
-      .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
-      .ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; color: var(--dsw-alias-text-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.14); }
-      .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-primary, #3370FF); font-size: 12px; cursor: pointer; }
-      .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
-      @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 .ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
         .ft-status-dot.running { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-dot-breathe 3.4s ease-in-out infinite; }
         .ft-status-dot.approval { background: var(--dsw-alias-state-warning-primary, #D97706); }
@@ -386,6 +374,23 @@ interface SendToGroupProps {
  * composer slot rather than the right sidebar.
  */
 
+
+/** Styles for the composer control; they must not depend on the tasks pane. */
+const COMPOSER_CSS = `
+.ft-composer-send { position: relative; display: inline-flex; align-items: center; }
+.ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
+.ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-business-primary, #3370FF); }
+.ft-send-button:disabled { opacity: .38; cursor: default; }
+.ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 220px; max-height: 280px; overflow: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 10px 30px rgba(15,23,42,.14); }
+.ft-send-menu-title { padding: 8px 10px 6px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
+.ft-send-menu-item { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 32px; color: var(--dsw-alias-label-primary, #1F2329); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
+.ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
+.ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-business-primary, #3370FF); font-size: 12px; cursor: pointer; }
+.ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
+@keyframes ft-send-rotate { to { transform: rotate(360deg); } }
+`
+
 /** Solid paper plane: the composer row is all filled glyphs at this size. */
 function SendPlaneIcon(): ReactNS.ReactElement {
   return (
@@ -453,9 +458,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     ? t('sendToGroupSending')
     : targets.length === 0
       ? t('sendToGroupNone')
-      : draft.trim() === ''
-        ? t('sendToGroupEmpty')
-        : attachments > 0 ? t('sendToGroupAttachments') : ''
+      : attachments > 0 ? t('sendToGroupAttachments') : ''
 
   React.useEffect(() => {
     if (note === null) return
@@ -467,13 +470,12 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     if (busy || blocked !== '' || targets === null) return
     setBusy(true)
     setNote(null)
-    // The composer text is an instruction for the model; the model writes the
-    // group message and posts it with feishu_send_to_chat. Posting the raw
-    // draft would send the user's notes verbatim, which is not what "让他们确认
-    // 一下" means.
+    // The group should receive what the MODEL decided to say, not the notes the
+    // user typed to steer it. So we hand the model a one-line instruction and
+    // let it call feishu_send_to_chat with its own wording.
     if (typeof inputActions.submit === 'function') {
       const previous = draft
-      inputActions.setDraft(`请把下面这段内容发送到飞书群「${target.label}」：\n\n${previous}`)
+      inputActions.setDraft(`把上面那条回答整理成一段可以直接发群里的消息，用 feishu_send_to_chat 发到飞书群「${target.label}」。`)
       window.setTimeout(() => {
         inputActions.submit?.()
         setBusy(false)
@@ -482,7 +484,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       }, 30)
       return
     }
-    // Older composer without submit: post directly so the control still works.
+    // A composer without submit cannot drive the model, so post the draft as-is.
     try {
       const response = await fetch(FEISHU_API, {
         method: 'POST',
@@ -510,6 +512,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
 
   return (
     <div className="ft-composer-send">
+      <style>{COMPOSER_CSS}</style>
       <button
         type="button"
         className={`ft-send-button${open ? ' open' : ''}`}
