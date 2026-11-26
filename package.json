@@ -1,6 +1,6 @@
 {
   "name": "habo-assistant",
-  "version": "0.17.4",
+  "version": "0.17.5",
   "private": true,
   "description": "Habo-Assistant: Feishu group bot bridge, session bindings, task tracking, and session artifacts for DeepSeek Harness.",
   "type": "module",
@@ -30,6 +30,7 @@
       "platform": "web",
       "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-session",
         "@deepseek-ai/dsh-client-ui-sidebar-right",

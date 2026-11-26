@@ -416,7 +416,8 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     return () => { alive = false }
   }, [sessionId])
 
-  if (targets === null || targets.length === 0) return null
+  if (targets === null) return <span className="ft-send-probe">飞书…</span> as unknown as ReactNS.ReactElement
+  if (targets.length === 0) return null
 
   if (inputActions === undefined || typeof inputActions.setDraft !== 'function') return null
 
@@ -566,12 +567,18 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
       // not provide a locale binder, so the bound `t` travels through a closure.
       const ComposerSend = (props: Omit<SendToGroupProps, 't'>): ReactNS.ReactElement | null =>
         SendToGroup({ ...props, t })
-      ctx.effect(() => ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
-        name: 'conversation.input.right',
-        id: 'feishu-send',
-        order: 120,
-        label: '发到飞书群',
-      }, ComposerSend)), 'feishu-bot: composer send')
+      ctx.effect(() => {
+        console.info('[feishu-bot] composer slot: injecting')
+        return ctx.slots.inject('conversation.input.right', () => {
+          console.info('[feishu-bot] composer slot: registering')
+          return ctx.slots.register({
+            name: 'conversation.input.right',
+            id: 'feishu-send',
+            order: 120,
+            label: '发到飞书群',
+          }, ComposerSend)
+        })
+      }, 'feishu-bot: composer send')
     }
 
     const sessionInfo = createSessionInfoPlugin(React, h)
