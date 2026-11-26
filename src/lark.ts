@@ -310,6 +310,34 @@ export class LarkCli {
   }
 
   /** Resolve a thread's parent chat; thread ids alone do not carry a chat id. */
+  /**
+   * Newest message id in one topic, used as the reply anchor.
+   *
+   * `+messages-send` cannot target a thread, so posting into a topic means
+   * replying to a message that already lives there.
+   */
+  async threadLatestMessage(threadId: string): Promise<string | undefined> {
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const { stdout } = await this.run([
+          'im', '+threads-messages-list',
+          '--thread', threadId,
+          '--page-size', '1',
+          '--order', 'desc',
+          '--no-reactions',
+          '--as', identity,
+          '--json',
+        ])
+        const parsed = parseCliJson(stdout) as { data?: { messages?: Array<{ message_id?: unknown }> } }
+        const id = parsed.data?.messages?.[0]?.message_id
+        if (typeof id === 'string' && id !== '') return id
+      } catch {
+        // Try the next identity; the caller falls back to a plain send.
+      }
+    }
+    return undefined
+  }
+
   async threadContext(threadId: string): Promise<{ chatId: string; threadId: string } | undefined> {
     let lastError: unknown
     for (const identity of ['bot', 'user'] as const) {

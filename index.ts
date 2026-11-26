@@ -181,6 +181,8 @@ export class FeishuBot {
   private readonly digestCache: Map<string, { at: number; summary: string; large: boolean }>
   /** Optional seam holder; public so hosts and tests can inject a backend. */
   readonly subagents: SubagentSeam
+  /** Recently sent manual messages, so a double click sends one message. */
+  private readonly manualSends: Map<string, { at: number; messageId?: string }>
   /** Per-chat chain: a second approval waits instead of failing closed. */
   private readonly approvalQueue: Map<string, Promise<void>>
   /** `${chatId}::${senderId}` -> trust expiry after one approval. */
@@ -252,6 +254,7 @@ export class FeishuBot {
     this.digestCache = new Map()
     this.requestTrust = new Map()
     this.approvalQueue = new Map()
+    this.manualSends = new Map()
     this.recentSenders = new Map()
     this.senderNames = new Map()
     this.dangerPatterns = compileDenyPatterns(DEFAULT_DENY_PATTERNS)
@@ -1772,6 +1775,64 @@ export class FeishuBot {
     return registry?.get(this.config.workspaceId)
   }
 
+  /** How the bot signs a session-initiated message; empty means no prefix. */
+  signingName(): string {
+    if (this.config.senderLabel !== '') return this.config.senderLabel
+    for (const openId of this.config.approveUsers) {
+      const name = this.senderNames.get(openId)
+      if (name !== undefined && name !== '') return name
+    }
+    return ''
+  }
+
+  /**
+   * Post one message into a conversation this Session already owns.
+   *
+   * This is the user acting through the bot, so it is not an approval target:
+   * the caller has already checked the binding. The text is prefixed with the
+   * actor's name only when that name is actually known.
+   */
+  async sendManual(input: { chatId: string; threadId: string; text: string }): Promise<{ messageId?: string; chatName?: string }> {
+    const text = typeof input.text === 'string' ? input.text.trim() : ''
+    if (text === '') throw new Error('text is required')
+    // A double click must not post twice; Feishu's own idempotency key is
+    // per-hour, which would also swallow a deliberate repeat.
+    const fingerprint = `${input.chatId}\u0000${input.threadId}\u0000${text}`
+    const recent = this.manualSends.get(fingerprint)
+    if (recent !== undefined && Date.now() - recent.at < 10_000) {
+      this.metrics.inc('manualSendRepeated')
+      return { messageId: recent.messageId }
+    }
+    const label = this.signingName()
+    const body = label === '' ? text : `来自 ${label} 的问询：\n\n${text}`
+    const keySuffix = `manual-${Date.now()}`
+    let messageId: string | undefined
+    if (input.threadId === '') {
+      messageId = await this.cli.send(input.chatId, body, keySuffix)
+    } else {
+      const anchor = await this.cli.threadLatestMessage(input.threadId)
+      messageId = anchor === undefined
+        ? await this.cli.send(input.chatId, body, keySuffix)
+        : await this.cli.reply(anchor, body, { inThread: true, keySuffix })
+    }
+    this.manualSends.set(fingerprint, { at: Date.now(), messageId })
+    if (this.manualSends.size > 100) {
+      const oldest = [...this.manualSends.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+      if (oldest !== undefined) this.manualSends.delete(oldest[0])
+    }
+    this.metrics.inc('manualSend')
+    const chatName = await this.chatName(input.chatId).catch(() => undefined)
+    this.ctx.logger.info(JSON.stringify({
+      event: 'feishu.manualSend',
+      chatId: input.chatId,
+      threadId: input.threadId,
+      chars: text.length,
+      prefixed: label !== '',
+      messageId: messageId ?? null,
+    }))
+    return { ...(messageId === undefined ? {} : { messageId }), ...(chatName === undefined ? {} : { chatName }) }
+  }
+
   /** Apply the configured DSH permission preset to a bot session. */
   applyPermissionPreset(sessionId: string): void {
     const name = this.config.permissionPreset
@@ -2342,6 +2403,25 @@ export class BotHost {
   async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
+  /**
+   * Post one message from a Session into a conversation it already owns.
+   *
+   * The binding check is the authorization: a Session may only speak into its
+   * own conversations, so this cannot be used to message an arbitrary group.
+   */
+  async sendToChat(input: { sessionId: string; chatId: string; threadId?: string; text: string }): Promise<{ messageId?: string; chatName?: string }> {
+    const threadId = input.threadId ?? ''
+    const owner = this.bots.find(bot => bot.registry.entries().some(([, record]) =>
+      record.chatId === input.chatId
+      && (record.threadId ?? '') === threadId
+      && record.sessionId === input.sessionId))
+    if (owner === undefined) {
+      throw Object.assign(new Error('this session does not own that conversation'), { code: 'NOT_BOUND' })
+    }
+    const result = await owner.sendManual({ chatId: input.chatId, threadId, text: input.text })
+    return { ...result, botId: owner.config.botId } as { messageId?: string; chatName?: string }
+  }
+
 
   async unbindChat(chatId: string, botId?: string, threadId?: string): Promise<boolean> {
     return this.pick(botId).unbindChat(chatId, threadId)
@@ -2689,6 +2769,25 @@ async function handleFeishuApi(req: IncomingMessage, res: ServerResponse, bot: B
     }
     await bot.bindToSession(chatId, sessionId, botId, threadId ?? '')
     sendJson(res, 200, { ok: true, value: await bot.bindingStatus(true) })
+    return
+  }
+  if (action === 'sendToChat') {
+    const text = typeof body.text === 'string' ? body.text : ''
+    if (chatId === '' || sessionId === '') {
+      sendJson(res, 400, { ok: false, error: 'chatId and sessionId are required' })
+      return
+    }
+    if (text.trim() === '') {
+      sendJson(res, 400, { ok: false, error: 'text is required' })
+      return
+    }
+    try {
+      const value = await bot.sendToChat({ sessionId, chatId, threadId: threadId ?? '', text })
+      sendJson(res, 200, { ok: true, value })
+    } catch (error) {
+      const code = (error as { code?: string }).code === 'NOT_BOUND' ? 403 : 400
+      sendJson(res, code, { ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
     return
   }
   if (action === 'unbind') {

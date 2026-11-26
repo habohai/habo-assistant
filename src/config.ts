@@ -74,6 +74,13 @@ export interface Config {
    */
   mentionPolicy: 'all' | 'first'
   /**
+   * Display name used when the session posts into a group on the user's behalf.
+   *
+   * Empty means "use the name Feishu reported for the owner, else no prefix" —
+   * never a hardcoded person's name.
+   */
+  senderLabel: string
+  /**
    * Instruction telling the agent when to delegate to a subagent.
    *
    * Delegation is the model's decision through DSH's built-in `subagent` tool;
@@ -191,6 +198,7 @@ export function normalizeConfig(raw: unknown): Config {
       : 'non-owner',
     // 0 is a meaningful value here (trust disabled), so it bypasses integer().
     mentionPolicy: value.mentionPolicy === 'first' ? 'first' : 'all',
+    senderLabel: string('senderLabel').slice(0, 40),
     delegateGuidance: string('delegateGuidance', DEFAULTS.delegateGuidance).slice(0, 400),
     approvalMode: value.approvalMode === 'action' || value.approvalMode === 'off'
       ? value.approvalMode

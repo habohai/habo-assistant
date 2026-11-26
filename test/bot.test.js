@@ -771,3 +771,83 @@ test('a child session is mapped to its tree root for action approval', async () 
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a session can post into a group it already owns', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Runtime group', botMember: true })
+    await bot.bindChat('oc_1', 'ses_1')
+    assert.equal(bot.registry.get('oc_1')?.sessionId, 'ses_1')
+    bot.config.senderLabel = '海振国'
+    const result = await bot.sendManual({ chatId: 'oc_1', threadId: '', text: '这个功能点确认了吗' })
+    assert.ok(result !== undefined)
+    const sent = spawned.filter(request => request.argv.includes('+messages-send')).pop()
+    assert.ok(sent, 'a message must be sent')
+    const body = sent.argv[sent.argv.indexOf('--text') + 1]
+    assert.match(body, /来自 海振国 的问询/)
+    assert.match(body, /这个功能点确认了吗/)
+    assert.equal(bot.metrics.snapshot().counts.manualSend, 1)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a manual send without a known name adds no prefix', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    bot.trackSession('ses_1', 'oc_1')
+    await bot.sendManual({ chatId: 'oc_1', threadId: '', text: '纯文本内容' })
+    const sent = spawned.filter(request => request.argv.includes('+messages-send')).pop()
+    assert.equal(sent.argv[sent.argv.indexOf('--text') + 1], '纯文本内容')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('a double click does not post the same text twice', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    await bot.sendManual({ chatId: 'oc_1', threadId: '', text: '重复点击' })
+    await bot.sendManual({ chatId: 'oc_1', threadId: '', text: '重复点击' })
+    const sends = spawned.filter(request => request.argv.includes('+messages-send'))
+    assert.equal(sends.length, 1, 'the second click must be absorbed')
+    assert.equal(bot.metrics.snapshot().counts.manualSendRepeated, 1)
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('sendToChat refuses a conversation the session does not own', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    const host = new BotHost(bot.ctx, bot.config, [bot])
+    await assert.rejects(
+      () => host.sendToChat({ sessionId: 'ses_other', chatId: 'oc_1', text: '你好' }),
+      /does not own/,
+    )
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('sendToChat posts when the session owns the conversation', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Runtime group', botMember: true })
+    await bot.bindChat('oc_1', 'ses_1')
+    const host = new BotHost(bot.ctx, bot.config, [bot])
+    const value = await host.sendToChat({ sessionId: 'ses_1', chatId: 'oc_1', text: '确认一下' })
+    assert.ok(value.messageId !== undefined || spawned.some(r => r.argv.includes('+messages-send')))
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
