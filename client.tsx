@@ -1,6 +1,6 @@
 import type * as ReactNS from 'react'
 import { createSessionInfoPlugin } from './client-session.js'
-import { sessionDisplayTitle, useFeishuConnection } from './client-shared.js'
+import { FEISHU_API, sessionDisplayTitle, useFeishuConnection } from './client-shared.js'
 
 declare global {
   namespace JSX {
@@ -58,7 +58,7 @@ interface ClientContext {
   sidebarRight: { openTab(kind: string, options?: Record<string, unknown>): void }
   slots: {
     inject(name: string, callback: () => () => void): () => void
-    register(definition: { name: string; key: string; locale?: string }, component: unknown): () => void
+    register(definition: Record<string, unknown>, component: unknown): () => void
   }
 }
 
@@ -86,6 +86,17 @@ const zh: Record<string, string> = {
   elapsed: '{time}',
   open: '打开会话',
   questionFallback: '（无问题文本）',
+  sendToGroup: '发到飞书群',
+  sendToGroupHint: '把输入框的内容发到本会话绑定的群',
+  sendToGroupEmpty: '先把要发的话写进输入框',
+  sendToGroupAttachments: '暂只支持文本，请先移除附件',
+  sendToGroupPick: '选择群 / 话题',
+  sendToGroupNone: '本会话还没有绑定群',
+  sendToGroupSending: '发送中…',
+  sendToGroupDone: '已发送到 {name}',
+  sendToGroupUndo: '撤销',
+  sendToGroupFailed: '发送失败：{error}',
+  sendToGroupTopic: '{name} · 话题',
 }
 
 const en: Record<string, string> = {
@@ -240,6 +251,16 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-status { flex: none; width: 14px; height: 16px; margin-top: 0; display: flex; align-items: center; justify-content: center; }
         .ft-tab-title { display: inline-flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
 .ft-tab-title svg { flex: none; }
+      .ft-composer-send { position: relative; display: inline-flex; align-items: center; }
+      .ft-send-button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); background: transparent; color: var(--dsw-alias-text-secondary, #4B5563); font-size: 12px; line-height: 1; cursor: pointer; }
+      .ft-send-button:hover, .ft-send-button.open { border-color: var(--dsw-alias-state-primary, #3370FF); color: var(--dsw-alias-state-primary, #3370FF); }
+      .ft-send-button:disabled { opacity: .55; cursor: default; }
+      .ft-send-menu { position: absolute; right: 0; bottom: 30px; z-index: 30; min-width: 190px; max-width: 260px; max-height: 260px; overflow: auto; padding: 6px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 8px 24px rgba(0,0,0,.16); }
+      .ft-send-menu-title { padding: 4px 8px 6px; font-size: 12px; color: var(--dsw-alias-text-tertiary, #6B7280); }
+      .ft-send-menu-item { display: block; width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--dsw-alias-text-primary, #111827); cursor: pointer; }
+      .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
+      .ft-send-note { position: absolute; right: 0; bottom: 30px; z-index: 30; white-space: nowrap; padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--dsw-alias-text-primary, #111827); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+      .ft-send-undo { margin-left: 8px; border: 0; background: transparent; color: var(--dsw-alias-state-primary, #3370FF); cursor: pointer; font-size: 12px; }
 .ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
         .ft-status-dot.running { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-dot-breathe 3.4s ease-in-out infinite; }
         .ft-status-dot.approval { background: var(--dsw-alias-state-warning-primary, #D97706); }
@@ -329,6 +350,168 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
   }
 }
 
+
+/** One row of the group picker: a conversation this session already owns. */
+interface SendTarget {
+  key: string
+  chatId: string
+  threadId: string
+  label: string
+}
+
+interface ComposerInputState {
+  draft: string
+  attachmentIds?: readonly string[]
+}
+
+interface ComposerInputActions {
+  setDraft(text: string): void
+}
+
+interface SendToGroupProps {
+  useInput: (selector: (state: ComposerInputState) => unknown) => unknown
+  inputActions: ComposerInputActions
+  sessionId: string
+  t: TFunction
+}
+
+/**
+ * Composer control: post the draft into a group this Session owns.
+ *
+ * The draft only exists inside the composer, which is why this lives in the
+ * composer slot rather than the right sidebar.
+ */
+function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
+  const { useInput, inputActions, sessionId, t } = props
+  const draft = String(useInput(state => state.draft) ?? '')
+  const attachments = Number((useInput(state => (state.attachmentIds?.length ?? 0)) as number) ?? 0)
+  const [targets, setTargets] = React.useState<SendTarget[] | null>(null)
+  const [open, setOpen] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
+
+  React.useEffect(() => {
+    let alive = true
+    void fetch(`${FEISHU_API}?action=bindings`)
+      .then(response => response.json())
+      .then((payload: { value?: { bindings?: Array<Record<string, unknown>> } }) => {
+        if (!alive) return
+        const rows = (payload.value?.bindings ?? [])
+          .filter(row => row.sessionId === sessionId)
+          .map(row => {
+            const chatId = String(row.chatId ?? '')
+            const threadId = String(row.threadId ?? '')
+            const name = String(row.chatName ?? '') || chatId
+            return {
+              key: `${chatId}::${threadId}`,
+              chatId,
+              threadId,
+              label: threadId === '' ? name : t('sendToGroupTopic', { name }),
+            }
+          })
+        setTargets(rows)
+      })
+      .catch(() => { if (alive) setTargets([]) })
+    return () => { alive = false }
+  }, [sessionId])
+
+  if (targets === null || targets.length === 0) return null
+
+  const blocked = draft.trim() === ''
+    ? t('sendToGroupEmpty')
+    : attachments > 0 ? t('sendToGroupAttachments') : ''
+
+  React.useEffect(() => {
+    if (note === null) return
+    const timer = setTimeout(() => setNote(current => (current === note ? null : current)), 6000)
+    return () => clearTimeout(timer)
+  }, [note])
+
+  async function send(target: SendTarget): Promise<void> {
+    if (busy || blocked !== '') return
+    setBusy(true)
+    setNote(null)
+    try {
+      const response = await fetch(FEISHU_API, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sendToChat',
+          sessionId,
+          chatId: target.chatId,
+          threadId: target.threadId,
+          text: draft,
+        }),
+      })
+      const payload = await response.json() as { ok?: boolean; error?: string }
+      if (payload.ok !== true) throw new Error(payload.error ?? `HTTP ${response.status}`)
+      const previous = draft
+      inputActions.setDraft('')
+      setOpen(false)
+      setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
+    } catch (error) {
+      setNote({ text: t('sendToGroupFailed', { error: String((error as Error).message ?? error) }) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="ft-composer-send">
+      <button
+        type="button"
+        className={`ft-send-button${open ? ' open' : ''}`}
+        title={blocked === '' ? t('sendToGroupHint') : blocked}
+        aria-label={t('sendToGroup')}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={busy}
+        onMouseDown={(event: ReactNS.MouseEvent) => event.preventDefault()}
+        onClick={() => {
+          if (blocked !== '') { setNote({ text: blocked }); return }
+          setOpen(current => !current)
+        }}
+      >
+        {busy ? t('sendToGroupSending') : '飞书'}
+      </button>
+      {open ? (
+        <div className="ft-send-menu" role="listbox" aria-label={t('sendToGroupPick')}>
+          <div className="ft-send-menu-title">{t('sendToGroupPick')}</div>
+          {targets.map(target => (
+            <button
+              key={target.key}
+              type="button"
+              role="option"
+              className="ft-send-menu-item"
+              disabled={busy}
+              onClick={() => { void send(target) }}
+            >
+              {target.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {note === null ? null : (
+        <div className="ft-send-note" role="status">
+          {note.text}
+          {note.previous === undefined ? null : (
+            <button
+              type="button"
+              className="ft-send-undo"
+              onClick={() => {
+                inputActions.setDraft(note.previous ?? '')
+                setNote(null)
+              }}
+            >
+              {t('sendToGroupUndo')}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS.ReactElement {
   const { tab } = useTabInfo()
   // The icon must not shrink or push the label: the strip gives a fixed width.
@@ -376,6 +559,14 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
         name: 'sidebar.right.pane.tab.title',
         key: TAB_ID,
       }, TasksTitle)), 'feishu-bot: tasks title')
+      // The draft lives in the composer, so this control must too.
+      ctx.effect(() => ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+        name: 'conversation.input.right',
+        id: 'feishu-send',
+        order: 120,
+        label: 'feishu-send',
+        locale: NS,
+      }, SendToGroup)), 'feishu-bot: composer send')
     }
 
     const sessionInfo = createSessionInfoPlugin(React, h)
