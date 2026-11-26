@@ -2753,9 +2753,20 @@ function registerReadTool(ctx: HostContext, bot: BotHost): void {
         },
         required: ['chatId', 'threadId', 'messages'],
       },
-      render: (_args: unknown, value: { chatName?: string; chatId: string; messages: unknown[] }) => [{
+      // The rendered text is what the model reads, so it must carry the messages
+      // themselves — a bare count would make the tool useless.
+      render: (_args: unknown, value: {
+        chatName?: string
+        chatId: string
+        messages: Array<{ sender: string; time: string; text: string }>
+      }) => [{
         type: 'text',
-        text: `Read ${value.messages.length} message(s) from ${value.chatName ?? value.chatId}.`,
+        text: value.messages.length === 0
+          ? `${value.chatName ?? value.chatId} 最近没有可读消息。`
+          : [
+            `${value.chatName ?? value.chatId} · 最近 ${value.messages.length} 条（旧→新）`,
+            ...value.messages.map(row => `${row.time.slice(11, 16)} ${row.sender || '未知'}: ${row.text.slice(0, 300)}`),
+          ].join('\n'),
       }],
     },
     presentCall: (args: { chat?: string; limit?: number }) => ({
