@@ -564,7 +564,7 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
         name: 'conversation.input.right',
         id: 'feishu-send',
         order: 120,
-        label: 'feishu-send',
+        label: '发到飞书群',
         locale: NS,
       }, SendToGroup)), 'feishu-bot: composer send')
     }
