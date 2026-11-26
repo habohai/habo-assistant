@@ -411,7 +411,7 @@ const COMPOSER_CSS = `
 .ft-send-row-icon { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 9px; border: 0; border-radius: 6px; background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 1px 3px rgba(15,23,42,.12); font-size: 12px; line-height: 22px; color: var(--dsw-alias-label-secondary, #4B5563); cursor: pointer; }
 .ft-send-row-icon:hover { color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-row-icon.read:hover { color: var(--dsw-alias-state-success-primary, #16A34A); }
-.ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
+.ft-send-note { z-index: 60; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
 .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-business-primary, #3370FF); font-size: 12px; cursor: pointer; }
 .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
 @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
@@ -641,11 +641,11 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         aria-label={t('sendToGroup')}
         aria-haspopup="listbox"
         aria-expanded={open}
-        disabled={busy || !ready}
+        disabled={busy}
         onMouseDown={(event: ReactNS.MouseEvent) => event.preventDefault()}
         onClick={() => {
-          if (blocked !== '') { setNote({ text: blocked }); return }
-          if (!open) measureAnchor()
+          measureAnchor()
+          if (blocked !== '') { setOpen(false); setNote({ text: blocked }); return }
           setOpen(current => !current)
         }}
         ref={buttonRef}
@@ -710,8 +710,12 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
           ))}
         </div>,
       ) : null}
-      {note === null ? null : (
-        <div className="ft-send-note" role="status">
+      {note === null ? null : renderOverlay(
+        <div
+          className="ft-send-note"
+          role="status"
+          style={anchor === null ? { position: 'fixed', right: 16, bottom: 96 } : { position: 'fixed', left: anchor.left, bottom: anchor.bottom, width: anchor.width }}
+        >
           {note.text}
           {note.previous === undefined ? null : (
             <button
@@ -725,7 +729,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
               {t('sendToGroupUndo')}
             </button>
           )}
-        </div>
+        </div>,
       )}
     </div>
   )
