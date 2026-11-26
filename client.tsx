@@ -391,11 +391,13 @@ const COMPOSER_CSS = `
 @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 `
 
-/** Solid paper plane: the composer row is all filled glyphs at this size. */
+/** Chat bubble: the composer row is outline glyphs, so this matches the neighbours. */
 function SendPlaneIcon(): ReactNS.ReactElement {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M14.32 2.05a.6.6 0 0 1 .78.77l-3.6 11.1a.7.7 0 0 1-1.25.17L7.6 9.75 3.9 7.72a.7.7 0 0 1 .05-1.23l10.37-4.44Zm-5.9 7.1 1.86 3.24 2.4-7.4-4.26 4.16Z" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M13 3H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2v2.4L8 11h5a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Z" />
+      <path d="M5.2 6.1h5.6" />
+      <path d="M5.2 8.4h3.6" />
     </svg>
   )
 }
