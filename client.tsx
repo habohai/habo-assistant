@@ -492,6 +492,8 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const buttonRef = React.useRef<HTMLButtonElement | null>(null)
+  /** The portaled menu is outside rootRef, so it needs its own containment check. */
+  const menuRef = React.useRef<HTMLDivElement | null>(null)
   /** Fixed-position anchor: the composer clips absolutely positioned children. */
   const [anchor, setAnchor] = React.useState<{ left: number; bottom: number; width: number } | null>(null)
   const draftRef = React.useRef(draft)
@@ -501,8 +503,10 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   React.useEffect(() => {
     if (!open) return
     const onPointerDown = (event: MouseEvent): void => {
-      const root = rootRef.current
-      if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (rootRef.current?.contains(target) === true) return
+      if (menuRef.current?.contains(target) === true) return
       setOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -650,6 +654,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       </button>
       {open ? renderOverlay(
         <div
+          ref={menuRef}
           className="ft-send-menu"
           role="menu"
           aria-label={t('sendToGroupPick')}
