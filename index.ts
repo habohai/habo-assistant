@@ -65,7 +65,7 @@ export { MUTATING_TOOLS, READ_ONLY_TOOLS, describeToolCall, isMutatingTool } fro
 export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
 export { normalizeMentions, sanitizeForPost } from './src/format/sanitize.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
-export { idempotencyKey } from './src/lark.js'
+export { idempotencyKey, messageText } from './src/lark.js'
 export { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 export type { ReplyKind, ReplyPlan, ReplyReason } from './src/format/decide.js'
 export { DEFAULTS, configProblem, normalizeConfig } from './src/config.js'
@@ -1775,6 +1775,17 @@ export class FeishuBot {
     return registry?.get(this.config.workspaceId)
   }
 
+  /** Newest messages of one conversation, oldest last. */
+  async readMessages(chatId: string, threadId = '', limit = 20): Promise<Array<{
+    messageId: string
+    sender: string
+    time: string
+    text: string
+    threadId: string
+  }>> {
+    return this.cli.recentMessages(chatId, threadId, limit)
+  }
+
   /** How the bot signs a session-initiated message; empty means no prefix. */
   signingName(): string {
     if (this.config.senderLabel !== '') return this.config.senderLabel
@@ -2403,6 +2414,32 @@ export class BotHost {
   async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
+  /** Read the newest messages of a conversation this Session owns. */
+  async readOwnedConversation(sessionId: string, query: string, limit: number): Promise<{
+    chatId: string
+    threadId: string
+    chatName?: string
+    messages: Array<{ sender: string; time: string; text: string; messageId: string }>
+  }> {
+    const target = await this.resolveOwnedConversation(sessionId, query)
+    const owner = this.bots.find(bot => bot.registry.entries().some(([, record]) =>
+      record.chatId === target.chatId && (record.threadId ?? '') === target.threadId))
+    if (owner === undefined) throw new Error('that conversation is not bound to this Session')
+    const messages = await owner.readMessages(target.chatId, target.threadId, limit)
+    const chatName = await owner.chatName(target.chatId).catch(() => undefined)
+    return {
+      chatId: target.chatId,
+      threadId: target.threadId,
+      ...(chatName === undefined ? {} : { chatName }),
+      messages: messages.map(row => ({
+        sender: row.sender,
+        time: row.time,
+        text: row.text,
+        messageId: row.messageId,
+      })),
+    }
+  }
+
   /** Resolve a name or id among the conversations this Session owns. */
   async resolveOwnedConversation(sessionId: string, query: string): Promise<{ chatId: string; threadId: string }> {
     const owned = this.bots.flatMap(bot => bot.registry.entries()
@@ -2526,6 +2563,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
   registerSendTool(ctx, host)
+  registerReadTool(ctx, host)
   registerBindingInfoTool(ctx, host)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
@@ -2605,6 +2643,79 @@ function registerSendTool(ctx: HostContext, bot: BotHost): void {
       }
     },
   }), 'feishu-bot: send tool')
+}
+
+/**
+ * Let the agent read a bound group's recent messages.
+ *
+ * Reading is separate from posting: the model may want the group's context to
+ * answer here, and only sometimes to speak there.
+ */
+function registerReadTool(ctx: HostContext, bot: BotHost): void {
+  ctx.effect(() => ctx.tools.register({
+    name: 'feishu_read_chat',
+    description: 'Read the most recent messages of a Feishu group or topic that this Session owns. Use it to pick up what people said in that group before answering here, or to decide whether it is worth posting there. Reading never posts anything and never changes the binding.',
+    parameters: {
+      chat: {
+        type: 'string',
+        required: true,
+        description: 'Group name, chat id (oc_...), or topic id (omt_...) of a conversation bound to this Session.',
+      },
+      limit: {
+        type: 'number',
+        required: false,
+        description: 'How many recent messages to read, newest last. Default 20, maximum 50.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          threadId: { type: 'string' },
+          chatName: { type: 'string' },
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                sender: { type: 'string' },
+                time: { type: 'string' },
+                text: { type: 'string' },
+                messageId: { type: 'string' },
+              },
+              required: ['sender', 'time', 'text'],
+            },
+          },
+        },
+        required: ['chatId', 'threadId', 'messages'],
+      },
+      render: (_args: unknown, value: { chatName?: string; chatId: string; messages: unknown[] }) => [{
+        type: 'text',
+        text: `Read ${value.messages.length} message(s) from ${value.chatName ?? value.chatId}.`,
+      }],
+    },
+    presentCall: (args: { chat?: string; limit?: number }) => ({
+      card: 'generic',
+      title: 'Read Feishu group',
+      kind: 'other',
+      rawInput: args,
+    }),
+    async execute(args: { chat?: unknown; limit?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
+      const sessionId = exec.agent?.session?.id
+      if (typeof sessionId !== 'string' || sessionId === '') throw new Error('feishu_read_chat requires an owning Session')
+      const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : 20
+      const read = await bot.readOwnedConversation(sessionId, typeof args.chat === 'string' ? args.chat.trim() : '', limit)
+      return {
+        chatId: read.chatId,
+        threadId: read.threadId,
+        ...(read.chatName === undefined ? {} : { chatName: read.chatName }),
+        messages: read.messages,
+      }
+    },
+  }), 'feishu-bot: read tool')
 }
 
 function registerBindTool(ctx: HostContext, bot: BotHost): void {

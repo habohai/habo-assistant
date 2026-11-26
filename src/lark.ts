@@ -103,6 +103,31 @@ export function idempotencyKey(prefix: string, ...parts: string[]): string {
   return `${prefix}-${hash.toString(36)}`
 }
 
+/** Plain text of one raw message row, whatever its type. */
+export function messageText(message: Record<string, unknown>): string {
+  const raw = message.content
+  if (typeof raw !== 'string' || raw === '') return ''
+  const type = typeof message.msg_type === 'string' ? message.msg_type : 'text'
+  if (type !== 'text' && type !== 'post') {
+    // Media and system rows carry no readable text; one marker keeps the order.
+    return type === 'image' ? '[图片]' : type === 'file' ? '[文件]' : type === 'system' ? '' : `[${type}]`
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const text = typeof parsed.text === 'string' ? parsed.text : ''
+    if (text !== '') return text.replace(/@_user_\d+/g, '').trim()
+    // post: {title, content: [[{tag, text}]]}
+    const blocks = (parsed.content as Array<Array<{ text?: unknown }>> | undefined) ?? []
+    return blocks
+      .flatMap(line => line.map(span => (typeof span.text === 'string' ? span.text : '')))
+      .join('')
+      .replace(/@_user_\d+/g, '')
+      .trim()
+  } catch {
+    return ''
+  }
+}
+
 export class LarkCli {
   private readonly ctx: LarkContext
   private readonly name: string
@@ -365,6 +390,54 @@ export class LarkCli {
   }
 
   /** Recent topics visible in a chat, keyed by omt_ thread id. */
+  /**
+   * Read the newest messages of one conversation.
+   *
+   * Used when the agent needs the group's recent context before answering or
+   * deciding to speak. `threadId` narrows a topic; empty means the group main
+   * conversation.
+   */
+  async recentMessages(chatId: string, threadId = '', limit = 20): Promise<Array<{
+    messageId: string
+    sender: string
+    time: string
+    text: string
+    threadId: string
+  }>> {
+    const size = Math.min(Math.max(Math.floor(limit), 1), 50)
+    let lastError: unknown
+    for (const identity of ['bot', 'user'] as const) {
+      try {
+        const args = threadId === ''
+          ? ['im', '+chat-messages-list', '--chat-id', chatId]
+          : ['im', '+threads-messages-list', '--thread', threadId]
+        const { stdout } = await this.run([
+          ...args,
+          '--as', identity,
+          '--order', 'desc',
+          '--page-size', String(size),
+          '--no-reactions',
+          '--json',
+        ])
+        const parsed = parseCliJson(stdout) as {
+          data?: { messages?: Array<Record<string, unknown>> }
+        }
+        const rows = (parsed.data?.messages ?? []).map(message => ({
+          messageId: typeof message.message_id === 'string' ? message.message_id : '',
+          sender: String((message.sender as { name?: unknown } | undefined)?.name ?? ''),
+          time: typeof message.create_time === 'string' ? message.create_time : '',
+          text: messageText(message),
+          threadId: typeof message.thread_id === 'string' ? message.thread_id : '',
+        })).filter(row => row.messageId !== '' && row.text !== '')
+        // Newest first from the CLI; the caller reads oldest → newest.
+        return rows.reverse()
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('cannot read recent messages')
+  }
+
   async listTopics(chatId: string): Promise<Array<{ threadId: string; title: string; updatedAt: number }>> {
     let lastError: unknown
     for (const identity of ['bot', 'user'] as const) {

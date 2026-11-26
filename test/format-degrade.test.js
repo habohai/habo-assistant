@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LarkCli, idempotencyKey } from '../lib/index.js'
+import { LarkCli, idempotencyKey, messageText } from '../lib/index.js'
 
 /** Minimal subprocess double that fails the first N invocations. */
 function harness(failures) {
@@ -151,4 +151,12 @@ test('the placeholder edit stays plain for plain answers', async () => {
   const { cli, calls } = harness(0)
   await cli.edit('om_1', '收到')
   assert.ok(calls[0].includes('--text'))
+})
+
+test('message rows are reduced to readable text', () => {
+  assert.equal(messageText({ msg_type: 'text', content: '{"text":"@_user_1 你好"}' }), '你好')
+  assert.equal(messageText({ msg_type: 'post', content: '{"content":[[{"tag":"text","text":"一行"}],[{"tag":"text","text":"二行"}]]}' }), '一行二行')
+  assert.equal(messageText({ msg_type: 'image', content: '{"image_key":"img"}' }), '[图片]')
+  assert.equal(messageText({ msg_type: 'system', content: '{}' }), '')
+  assert.equal(messageText({ msg_type: 'text', content: 'not json' }), '')
 })
