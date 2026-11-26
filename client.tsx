@@ -382,7 +382,8 @@ interface SendToGroupProps {
  * composer slot rather than the right sidebar.
  */
 function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
-  const { useInput, inputActions, sessionId, t } = props
+  const { useInput, inputActions, sessionId } = props
+  const t: TFunction = typeof props.t === 'function' ? props.t : (key => key)
   const draft = String(useInput(state => state.draft) ?? '')
   const attachments = Number((useInput(state => (state.attachmentIds?.length ?? 0)) as number) ?? 0)
   const [targets, setTargets] = React.useState<SendTarget[] | null>(null)
@@ -559,14 +560,16 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
         name: 'sidebar.right.pane.tab.title',
         key: TAB_ID,
       }, TasksTitle)), 'feishu-bot: tasks title')
-      // The draft lives in the composer, so this control must too.
+      // The draft lives in the composer, so this control must too. The slot does
+      // not provide a locale binder, so the bound `t` travels through a closure.
+      const ComposerSend = (props: Omit<SendToGroupProps, 't'>): ReactNS.ReactElement | null =>
+        SendToGroup({ ...props, t })
       ctx.effect(() => ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
         name: 'conversation.input.right',
         id: 'feishu-send',
         order: 120,
         label: '发到飞书群',
-        locale: NS,
-      }, SendToGroup)), 'feishu-bot: composer send')
+      }, ComposerSend)), 'feishu-bot: composer send')
     }
 
     const sessionInfo = createSessionInfoPlugin(React, h)
