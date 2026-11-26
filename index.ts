@@ -2414,6 +2414,23 @@ export class BotHost {
   async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
+  /** Every conversation bound to this Session, by name. */
+  async listOwnedConversations(sessionId: string): Promise<Array<{ chatId: string; threadId: string; name: string }>> {
+    const rows: Array<{ chatId: string; threadId: string; name: string }> = []
+    for (const bot of this.bots) {
+      for (const [, record] of bot.registry.entries()) {
+        if (record.sessionId !== sessionId) continue
+        const name = (await bot.chatName(record.chatId).catch(() => undefined)) ?? record.chatId
+        rows.push({
+          chatId: record.chatId,
+          threadId: record.threadId ?? '',
+          name: (record.threadId ?? '') === '' ? name : `${name} · 话题`,
+        })
+      }
+    }
+    return rows
+  }
+
   /** Read the newest messages of a conversation this Session owns. */
   async readOwnedConversation(sessionId: string, query: string, limit: number): Promise<{
     chatId: string
@@ -2564,6 +2581,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   registerBindTool(ctx, host)
   registerSendTool(ctx, host)
   registerReadTool(ctx, host)
+  registerListTool(ctx, host)
   registerBindingInfoTool(ctx, host)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
@@ -2651,6 +2669,49 @@ function registerSendTool(ctx: HostContext, bot: BotHost): void {
  * Reading is separate from posting: the model may want the group's context to
  * answer here, and only sometimes to speak there.
  */
+/** List the conversations this Session owns, so the model can pick one by name. */
+function registerListTool(ctx: HostContext, bot: BotHost): void {
+  ctx.effect(() => ctx.tools.register({
+    name: 'feishu_list_chats',
+    description: 'List the Feishu groups and topics this Session is bound to. Call it before feishu_read_chat or feishu_send_to_chat when you are not sure of the exact group name.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chats: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                chatId: { type: 'string' },
+                threadId: { type: 'string' },
+                name: { type: 'string' },
+              },
+              required: ['chatId', 'threadId', 'name'],
+            },
+          },
+        },
+        required: ['chats'],
+      },
+      render: (_args: unknown, value: { chats: unknown[] }) => [{
+        type: 'text',
+        text: value.chats.length === 0
+          ? 'This Session owns no Feishu conversation yet.'
+          : `${value.chats.length} conversation(s) bound to this Session.`,
+      }],
+    },
+    presentCall: () => ({ card: 'generic', title: 'List Feishu groups', kind: 'fetch' }),
+    async execute(_args: unknown, exec: { agent?: { session?: { id?: string } } }) {
+      const sessionId = exec.agent?.session?.id
+      if (typeof sessionId !== 'string' || sessionId === '') throw new Error('feishu_list_chats requires an owning Session')
+      return { chats: await bot.listOwnedConversations(sessionId) }
+    },
+  }), 'feishu-bot: list tool')
+}
+
 function registerReadTool(ctx: HostContext, bot: BotHost): void {
   ctx.effect(() => ctx.tools.register({
     name: 'feishu_read_chat',
@@ -2664,7 +2725,7 @@ function registerReadTool(ctx: HostContext, bot: BotHost): void {
       limit: {
         type: 'number',
         required: false,
-        description: 'How many recent messages to read, newest last. Default 20, maximum 50.',
+        description: 'How many recent messages to read, newest last. Default 10, maximum 50.',
       },
     },
     output: {
@@ -2700,13 +2761,29 @@ function registerReadTool(ctx: HostContext, bot: BotHost): void {
     presentCall: (args: { chat?: string; limit?: number }) => ({
       card: 'generic',
       title: 'Read Feishu group',
-      kind: 'other',
+      kind: 'fetch',
       rawInput: args,
+    }),
+    presentResult: (value: {
+      chatName?: string
+      chatId: string
+      messages: Array<{ sender: string; time: string; text: string }>
+    }) => ({
+      card: 'generic',
+      title: `${value.chatName ?? value.chatId} · 最近 ${value.messages.length} 条`,
+      content: [{
+        type: 'text',
+        text: [
+          '| 时间 | 发言人 | 内容 |',
+          '| --- | --- | --- |',
+          ...value.messages.map(row => `| ${row.time.slice(11, 16)} | ${row.sender || '未知'} | ${row.text.replace(/\|/g, '\\|').slice(0, 200)} |`),
+        ].join('\n'),
+      }],
     }),
     async execute(args: { chat?: unknown; limit?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
       const sessionId = exec.agent?.session?.id
       if (typeof sessionId !== 'string' || sessionId === '') throw new Error('feishu_read_chat requires an owning Session')
-      const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : 20
+      const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : 10
       const read = await bot.readOwnedConversation(sessionId, typeof args.chat === 'string' ? args.chat.trim() : '', limit)
       return {
         chatId: read.chatId,

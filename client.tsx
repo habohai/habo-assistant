@@ -90,7 +90,10 @@ const zh: Record<string, string> = {
   sendToGroupHint: '把最近一条回答发到本会话绑定的群',
   sendToGroupEmpty: '先把要发的话写进输入框',
   sendToGroupAttachments: '暂只支持文本，请先移除附件',
-  sendToGroupPick: '把回答发到',
+  sendToGroupPick: '飞书群',
+  sendToGroupSource: '发送内容',
+  sendToGroupSourceLast: '上一条回答',
+  sendToGroupSourceDraft: '输入框内容',
   sendToGroupNone: '本会话还没有绑定群',
   sendToGroupSending: '发送中…',
   sendToGroupDone: '已发送到 {name}',
@@ -387,18 +390,45 @@ const COMPOSER_CSS = `
 .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-button:disabled { opacity: .38; cursor: default; }
 .ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 220px; max-height: 280px; overflow: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 10px 30px rgba(15,23,42,.14); }
-.ft-send-menu-title { padding: 8px 10px 6px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
+.ft-send-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 8px 10px; }
+.ft-send-menu-title { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
+.ft-send-source { height: 22px; padding: 0 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.1)); border-radius: 6px; background: transparent; font-size: 11px; color: var(--dsw-alias-label-secondary, #6B7280); cursor: pointer; outline: none; }
 .ft-send-menu-item { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 32px; color: var(--dsw-alias-label-primary, #1F2329); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
-.ft-send-menu-row { display: flex; align-items: center; gap: 2px; }
+.ft-send-menu-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.ft-send-menu-row:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
 .ft-send-menu-row .ft-send-menu-item { flex: 1 1 auto; min-width: 0; }
-.ft-send-menu-read { flex: none; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8A8F98); cursor: pointer; }
-.ft-send-menu-read:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); color: var(--dsw-alias-state-business-primary, #3370FF); }
+.ft-send-menu-item:hover { background: transparent; }
+.ft-send-row-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; padding-right: 4px; opacity: 0; transition: opacity .12s ease; }
+.ft-send-menu-row:hover .ft-send-row-actions, .ft-send-menu-row:focus-within .ft-send-row-actions { opacity: 1; }
+.ft-send-row-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary, #8A8F98); cursor: pointer; }
+.ft-send-row-icon:hover { background: var(--dsw-alias-bg-elevated, #fff); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
 .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-business-primary, #3370FF); font-size: 12px; cursor: pointer; }
 .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
 @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 `
+
+/** Outbound arrow for one row's send action. */
+function SendArrowIcon(): ReactNS.ReactElement {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 3h3v3" />
+      <path d="M13 3 7.5 8.5" />
+      <path d="M12.5 9.5v2.7a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V4.3a.8.8 0 0 1 .8-.8h2.8" />
+    </svg>
+  )
+}
+
+/** Open-book glyph for one row's read action. */
+function ReadBookIcon(): ReactNS.ReactElement {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 3.6h3.2c.7 0 1.3.6 1.3 1.3v7.5c0-.6-.5-1.1-1.1-1.1H2.5V3.6Z" />
+      <path d="M13.5 3.6H10.3c-.7 0-1.3.6-1.3 1.3v7.5c0-.6.5-1.1 1.1-1.1h3.4V3.6Z" />
+    </svg>
+  )
+}
 
 /** Chat bubble: the composer row is outline glyphs, so this matches the neighbours. */
 function SendPlaneIcon(): ReactNS.ReactElement {
@@ -428,6 +458,8 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const [targets, setTargets] = React.useState<SendTarget[] | null>(null)
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  /** Where the published text comes from: the last answer, or this draft. */
+  const [source, setSource] = React.useState<'last' | 'draft'>('last')
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const draftRef = React.useRef(draft)
@@ -515,7 +547,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       return
     }
     const previous = draft
-    inputActions.setDraft(`用 feishu_read_chat 读一下飞书群「${target.label}」最近 20 条消息，结合当前会话的上下文分析，把要点告诉我；需要我在群里回的话再问我。`)
+    inputActions.setDraft(`用 feishu_read_chat 读一下飞书群「${target.label}」最近 10 条消息，结合当前会话的上下文分析，把要点告诉我；需要我在群里回的话再问我。`)
     window.setTimeout(() => {
       inputActions.submit?.()
       setBusy(false)
@@ -525,15 +557,22 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
 
   async function send(target: SendTarget): Promise<void> {
     if (busy || blocked !== '' || targets === null) return
+    const wantsDraft = source === 'draft'
+    if (wantsDraft && draft.trim() === '') {
+      setNote({ text: t('sendToGroupEmpty') })
+      return
+    }
     setBusy(true)
     setNote(null)
-    // The group should receive what the MODEL decided to say, not the notes the
-    // user typed to steer it. So we hand the model a one-line instruction and
-    // let it call feishu_send_to_chat with its own wording.
-    setOpen(false)
+    // Both sources go through the model: it reads the material, tidies it into
+    // something a group can read, then posts. A verbatim forward would be
+    // something the user can do in Feishu directly.
     if (typeof inputActions.submit === 'function') {
       const previous = draft
-      inputActions.setDraft(`把上面那条回答整理成一段可以直接发群里的消息，用 feishu_send_to_chat 发到飞书群「${target.label}」。`)
+      const instruction = wantsDraft
+        ? `把下面这段内容校对、整理成一段可以直接发群里的消息，用 feishu_send_to_chat 发到飞书群「${target.label}」：\n\n${previous}`
+        : `把上面那条回答整理成一段可以直接发群里的消息，用 feishu_send_to_chat 发到飞书群「${target.label}」。`
+      inputActions.setDraft(instruction)
       window.setTimeout(() => {
         inputActions.submit?.()
         setBusy(false)
@@ -556,10 +595,8 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       })
       const payload = await response.json() as { ok?: boolean; error?: string }
       if (payload.ok !== true) throw new Error(payload.error ?? `HTTP ${response.status}`)
-      const previous = draft
       inputActions.setDraft('')
-      setOpen(false)
-      setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
+      setNote({ text: t('sendToGroupDone', { name: target.label }) })
     } catch (error) {
       setNote({ text: t('sendToGroupFailed', { error: String((error as Error).message ?? error) }) })
     } finally {
@@ -587,13 +624,24 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         {busy ? SendSpinner() : SendPlaneIcon()}
       </button>
       {open ? (
-        <div className="ft-send-menu" role="listbox" aria-label={t('sendToGroupPick')}>
-          <div className="ft-send-menu-title">{t('sendToGroupPick')}</div>
+        <div className="ft-send-menu" role="menu" aria-label={t('sendToGroupPick')}>
+          <div className="ft-send-menu-head">
+            <span className="ft-send-menu-title">{t('sendToGroupPick')}</span>
+            <select
+              className="ft-send-source"
+              aria-label={t('sendToGroupSource')}
+              value={source}
+              onChange={(event: ReactNS.ChangeEvent<HTMLSelectElement>) => setSource(event.target.value === 'draft' ? 'draft' : 'last')}
+            >
+              <option value="last">{t('sendToGroupSourceLast')}</option>
+              <option value="draft">{t('sendToGroupSourceDraft')}</option>
+            </select>
+          </div>
           {(targets ?? []).map(target => (
             <div key={target.key} className="ft-send-menu-row">
               <button
                 type="button"
-                role="option"
+                role="menuitem"
                 className="ft-send-menu-item"
                 title={t('sendToGroupRowSend')}
                 disabled={busy}
@@ -601,15 +649,28 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
               >
                 {target.label}
               </button>
-              <button
-                type="button"
-                className="ft-send-menu-read"
-                title={t('sendToGroupRowRead')}
-                disabled={busy}
-                onClick={() => { void read(target) }}
-              >
-                {t('sendToGroupRead')}
-              </button>
+              <span className="ft-send-row-actions">
+                <button
+                  type="button"
+                  className="ft-send-row-icon"
+                  title={t('sendToGroupRowSend')}
+                  aria-label={t('sendToGroupRowSend')}
+                  disabled={busy}
+                  onClick={() => { void send(target) }}
+                >
+                  <SendArrowIcon />
+                </button>
+                <button
+                  type="button"
+                  className="ft-send-row-icon"
+                  title={t('sendToGroupRowRead')}
+                  aria-label={t('sendToGroupRowRead')}
+                  disabled={busy}
+                  onClick={() => { void read(target) }}
+                >
+                  <ReadBookIcon />
+                </button>
+              </span>
             </div>
           ))}
         </div>
