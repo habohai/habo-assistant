@@ -86,7 +86,7 @@ const zh: Record<string, string> = {
   elapsed: '{time}',
   open: '打开会话',
   questionFallback: '（无问题文本）',
-  sendToGroup: '发到飞书群',
+  sendToGroup: '飞书',
   sendToGroupHint: '把输入框的内容发到本会话绑定的群',
   sendToGroupEmpty: '先把要发的话写进输入框',
   sendToGroupAttachments: '暂只支持文本，请先移除附件',
@@ -392,6 +392,11 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
 
   React.useEffect(() => {
+    console.info('[feishu-bot] composer props', Object.keys(props), 'sessionId=', sessionId,
+      'actions=', typeof inputActions?.setDraft, 'useInput=', typeof useInput)
+  }, [])
+
+  React.useEffect(() => {
     let alive = true
     void fetch(`${FEISHU_API}?action=bindings`)
       .then(response => response.json())
@@ -410,20 +415,24 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
               label: threadId === '' ? name : t('sendToGroupTopic', { name }),
             }
           })
+        console.info('[feishu-bot] composer targets', rows.length, 'sessionId=', sessionId)
         setTargets(rows)
       })
-      .catch(() => { if (alive) setTargets([]) })
+      .catch(error => {
+        console.info('[feishu-bot] composer targets failed', String(error))
+        if (alive) setTargets([])
+      })
     return () => { alive = false }
   }, [sessionId])
 
-  if (targets === null) return <span className="ft-send-probe">飞书…</span> as unknown as ReactNS.ReactElement
-  if (targets.length === 0) return null
-
-  if (inputActions === undefined || typeof inputActions.setDraft !== 'function') return null
-
-  const blocked = draft.trim() === ''
-    ? t('sendToGroupEmpty')
-    : attachments > 0 ? t('sendToGroupAttachments') : ''
+  const ready = targets !== null && targets.length > 0
+  const blocked = targets === null
+    ? t('sendToGroupSending')
+    : targets.length === 0
+      ? t('sendToGroupNone')
+      : draft.trim() === ''
+        ? t('sendToGroupEmpty')
+        : attachments > 0 ? t('sendToGroupAttachments') : ''
 
   React.useEffect(() => {
     if (note === null) return
@@ -432,7 +441,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   }, [note])
 
   async function send(target: SendTarget): Promise<void> {
-    if (busy || blocked !== '') return
+    if (busy || blocked !== '' || targets === null) return
     setBusy(true)
     setNote(null)
     try {
@@ -450,7 +459,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       const payload = await response.json() as { ok?: boolean; error?: string }
       if (payload.ok !== true) throw new Error(payload.error ?? `HTTP ${response.status}`)
       const previous = draft
-      inputActions.setDraft('')
+      if (typeof inputActions?.setDraft === 'function') inputActions.setDraft('')
       setOpen(false)
       setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
     } catch (error) {
@@ -469,19 +478,19 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         aria-label={t('sendToGroup')}
         aria-haspopup="listbox"
         aria-expanded={open}
-        disabled={busy}
+        disabled={busy || !ready}
         onMouseDown={(event: ReactNS.MouseEvent) => event.preventDefault()}
         onClick={() => {
           if (blocked !== '') { setNote({ text: blocked }); return }
           setOpen(current => !current)
         }}
       >
-        {busy ? t('sendToGroupSending') : '飞书'}
+        {busy ? t('sendToGroupSending') : t('sendToGroup')}
       </button>
       {open ? (
         <div className="ft-send-menu" role="listbox" aria-label={t('sendToGroupPick')}>
           <div className="ft-send-menu-title">{t('sendToGroupPick')}</div>
-          {targets.map(target => (
+          {(targets ?? []).map(target => (
             <button
               key={target.key}
               type="button"
