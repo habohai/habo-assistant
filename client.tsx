@@ -90,10 +90,7 @@ const zh: Record<string, string> = {
   sendToGroupHint: '把最近一条回答发到本会话绑定的群',
   sendToGroupEmpty: '先把要发的话写进输入框',
   sendToGroupAttachments: '暂只支持文本，请先移除附件',
-  sendToGroupPick: '飞书群',
-  sendToGroupSource: '发送内容',
-  sendToGroupSourceLast: '上一条回答',
-  sendToGroupSourceDraft: '输入框内容',
+  sendToGroupPick: '飞书群 · 点击群名发送上一条回答',
   sendToGroupNone: '本会话还没有绑定群',
   sendToGroupSending: '发送中…',
   sendToGroupDone: '已发送到 {name}',
@@ -102,8 +99,11 @@ const zh: Record<string, string> = {
   sendToGroupTopic: '{name} · 话题',
   sendToGroupRead: '读',
   sendToGroupSend: '发',
-  sendToGroupRowSend: '把上一条回答发到这个群',
+  sendToGroupSendLast: '发回答',
+  sendToGroupSendDraft: '发草稿',
+  sendToGroupRowSend: '把上一条回答整理后发到这个群',
   sendToGroupRowRead: '读这个群最近的消息',
+  sendToGroupRowSendDraft: '把输入框里的话校对后发到这个群',
   sendToGroupReadDone: '已开始读 {name}',
   sendToGroupReadManual: '当前输入框不支持提交，请直接说「读一下 XX 群」',
 }
@@ -391,8 +391,8 @@ const COMPOSER_CSS = `
 .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-button:disabled { opacity: .38; cursor: default; }
 .ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 300px; max-width: min(360px, 82vw); max-height: 280px; overflow: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 10px 30px rgba(15,23,42,.14); }
-.ft-send-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 8px 10px; }
-.ft-send-menu-title { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
+.ft-send-menu-head { padding: 8px 10px 6px; }
+.ft-send-menu-title { font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
 .ft-send-source { height: 22px; padding: 0 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.1)); border-radius: 6px; background: transparent; font-size: 11px; color: var(--dsw-alias-label-secondary, #6B7280); cursor: pointer; outline: none; }
 .ft-send-menu-item { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 32px; color: var(--dsw-alias-label-primary, #1F2329); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
@@ -439,8 +439,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const [targets, setTargets] = React.useState<SendTarget[] | null>(null)
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
-  /** Where the published text comes from: the last answer, or this draft. */
-  const [source, setSource] = React.useState<'last' | 'draft'>('last')
+
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const draftRef = React.useRef(draft)
@@ -536,9 +535,9 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     }, 30)
   }
 
-  async function send(target: SendTarget): Promise<void> {
+  async function send(target: SendTarget, mode: 'last' | 'draft'): Promise<void> {
     if (busy || blocked !== '' || targets === null) return
-    const wantsDraft = source === 'draft'
+    const wantsDraft = mode === 'draft'
     if (wantsDraft && draft.trim() === '') {
       setNote({ text: t('sendToGroupEmpty') })
       return
@@ -608,15 +607,6 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         <div className="ft-send-menu" role="menu" aria-label={t('sendToGroupPick')}>
           <div className="ft-send-menu-head">
             <span className="ft-send-menu-title">{t('sendToGroupPick')}</span>
-            <select
-              className="ft-send-source"
-              aria-label={t('sendToGroupSource')}
-              value={source}
-              onChange={(event: ReactNS.ChangeEvent<HTMLSelectElement>) => setSource(event.target.value === 'draft' ? 'draft' : 'last')}
-            >
-              <option value="last">{t('sendToGroupSourceLast')}</option>
-              <option value="draft">{t('sendToGroupSourceDraft')}</option>
-            </select>
           </div>
           {(targets ?? []).map(target => (
             <div key={target.key} className="ft-send-menu-row">
@@ -626,7 +616,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
                 className="ft-send-menu-item"
                 title={target.label}
                 disabled={busy}
-                onClick={() => { void send(target) }}
+                onClick={() => { void send(target, 'last') }}
               >
                 {target.label}
               </button>
@@ -636,10 +626,21 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
                   className="ft-send-row-icon send"
                   title={t('sendToGroupRowSend')}
                   disabled={busy}
-                  onClick={() => { void send(target) }}
+                  onClick={() => { void send(target, 'last') }}
                 >
-                  {t('sendToGroupSend')}
+                  {t('sendToGroupSendLast')}
                 </button>
+                {draft.trim() === '' ? null : (
+                  <button
+                    type="button"
+                    className="ft-send-row-icon send"
+                    title={t('sendToGroupRowSendDraft')}
+                    disabled={busy}
+                    onClick={() => { void send(target, 'draft') }}
+                  >
+                    {t('sendToGroupSendDraft')}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="ft-send-row-icon read"
