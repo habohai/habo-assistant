@@ -252,15 +252,17 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
         .ft-tab-title { display: inline-flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
 .ft-tab-title svg { flex: none; }
       .ft-composer-send { position: relative; display: inline-flex; align-items: center; }
-      .ft-send-button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); background: transparent; color: var(--dsw-alias-text-secondary, #4B5563); font-size: 12px; line-height: 1; cursor: pointer; }
-      .ft-send-button:hover, .ft-send-button.open { border-color: var(--dsw-alias-state-primary, #3370FF); color: var(--dsw-alias-state-primary, #3370FF); }
-      .ft-send-button:disabled { opacity: .55; cursor: default; }
-      .ft-send-menu { position: absolute; right: 0; bottom: 30px; z-index: 30; min-width: 190px; max-width: 260px; max-height: 260px; overflow: auto; padding: 6px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 8px 24px rgba(0,0,0,.16); }
-      .ft-send-menu-title { padding: 4px 8px 6px; font-size: 12px; color: var(--dsw-alias-text-tertiary, #6B7280); }
-      .ft-send-menu-item { display: block; width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--dsw-alias-text-primary, #111827); cursor: pointer; }
+      .ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-text-tertiary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
+      .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-primary, #3370FF); }
+      .ft-send-button:disabled { opacity: .38; cursor: default; }
+      .ft-send-menu { position: absolute; right: 0; bottom: 32px; z-index: 40; min-width: 200px; max-width: 280px; max-height: 280px; overflow: auto; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 32px rgba(15,23,42,.16); }
+      .ft-send-menu-title { padding: 6px 10px 8px; font-size: 11px; letter-spacing: .02em; color: var(--dsw-alias-text-tertiary, #8A8F98); }
+      .ft-send-menu-item { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 1.4; color: var(--dsw-alias-text-primary, #1F2329); cursor: pointer; }
       .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
-      .ft-send-note { position: absolute; right: 0; bottom: 30px; z-index: 30; white-space: nowrap; padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--dsw-alias-text-primary, #111827); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.12)); box-shadow: 0 6px 18px rgba(0,0,0,.12); }
-      .ft-send-undo { margin-left: 8px; border: 0; background: transparent; color: var(--dsw-alias-state-primary, #3370FF); cursor: pointer; font-size: 12px; }
+      .ft-send-note { position: absolute; right: 0; bottom: 32px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; max-width: 320px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; color: var(--dsw-alias-text-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.14); }
+      .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-primary, #3370FF); font-size: 12px; cursor: pointer; }
+      .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
+      @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 .ft-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #16A34A); }
         .ft-status-dot.running { background: var(--dsw-alias-state-business-primary, #3370FF); animation: ft-dot-breathe 3.4s ease-in-out infinite; }
         .ft-status-dot.approval { background: var(--dsw-alias-state-warning-primary, #D97706); }
@@ -381,6 +383,26 @@ interface SendToGroupProps {
  * The draft only exists inside the composer, which is why this lives in the
  * composer slot rather than the right sidebar.
  */
+
+/** Paper-plane glyph: matches the mute weight of the composer's own icons. */
+function SendPlaneIcon(): ReactNS.ReactElement {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M13.6 2.4 7.1 8.9" />
+      <path d="M13.6 2.4 9.9 13.6 7.1 8.9 2.4 6.1 13.6 2.4Z" />
+    </svg>
+  )
+}
+
+/** Same footprint while a send is in flight. */
+function SendSpinner(): ReactNS.ReactElement {
+  return (
+    <svg className="ft-send-spin" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <path d="M8 1.8a6.2 6.2 0 1 1-6.2 6.2" />
+    </svg>
+  )
+}
+
 function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const { useInput, inputActions, sessionId } = props
   const t: TFunction = typeof props.t === 'function' ? props.t : (key => key)
@@ -485,7 +507,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
           setOpen(current => !current)
         }}
       >
-        {busy ? t('sendToGroupSending') : t('sendToGroup')}
+        {busy ? SendSpinner() : SendPlaneIcon()}
       </button>
       {open ? (
         <div className="ft-send-menu" role="listbox" aria-label={t('sendToGroupPick')}>
