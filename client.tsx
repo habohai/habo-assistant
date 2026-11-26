@@ -420,6 +420,33 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const draftRef = React.useRef(draft)
+
+  // A popover that survives a click elsewhere reads as a stuck panel: close it on
+  // any outside pointer press, on Escape, and as soon as the user types.
+  React.useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent): void => {
+      const root = rootRef.current
+      if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+      setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  React.useEffect(() => {
+    if (open && draft !== draftRef.current) setOpen(false)
+    draftRef.current = draft
+  }, [draft, open])
 
   React.useEffect(() => {
     console.info('[feishu-bot] composer props', Object.keys(props), 'sessionId=', sessionId,
@@ -475,13 +502,13 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     // The group should receive what the MODEL decided to say, not the notes the
     // user typed to steer it. So we hand the model a one-line instruction and
     // let it call feishu_send_to_chat with its own wording.
+    setOpen(false)
     if (typeof inputActions.submit === 'function') {
       const previous = draft
       inputActions.setDraft(`把上面那条回答整理成一段可以直接发群里的消息，用 feishu_send_to_chat 发到飞书群「${target.label}」。`)
       window.setTimeout(() => {
         inputActions.submit?.()
         setBusy(false)
-        setOpen(false)
         setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
       }, 30)
       return
@@ -513,7 +540,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
   }
 
   return (
-    <div className="ft-composer-send">
+    <div className="ft-composer-send" ref={rootRef}>
       <style>{COMPOSER_CSS}</style>
       <button
         type="button"
