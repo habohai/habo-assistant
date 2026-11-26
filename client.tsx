@@ -87,10 +87,10 @@ const zh: Record<string, string> = {
   open: '打开会话',
   questionFallback: '（无问题文本）',
   sendToGroup: '飞书',
-  sendToGroupHint: '把输入框的内容发到本会话绑定的群',
+  sendToGroupHint: '让模型把这件事发到本会话绑定的群',
   sendToGroupEmpty: '先把要发的话写进输入框',
   sendToGroupAttachments: '暂只支持文本，请先移除附件',
-  sendToGroupPick: '选择群 / 话题',
+  sendToGroupPick: '让模型发到',
   sendToGroupNone: '本会话还没有绑定群',
   sendToGroupSending: '发送中…',
   sendToGroupDone: '已发送到 {name}',
@@ -255,11 +255,11 @@ function makeBody(openSession: (id: string) => void, refresh: () => Promise<void
       .ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-text-tertiary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
       .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-primary, #3370FF); }
       .ft-send-button:disabled { opacity: .38; cursor: default; }
-      .ft-send-menu { position: absolute; right: 0; bottom: 32px; z-index: 40; min-width: 200px; max-width: 280px; max-height: 280px; overflow: auto; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 32px rgba(15,23,42,.16); }
+      .ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; min-width: 200px; max-width: 280px; max-height: 280px; overflow: auto; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 32px rgba(15,23,42,.16); }
       .ft-send-menu-title { padding: 6px 10px 8px; font-size: 11px; letter-spacing: .02em; color: var(--dsw-alias-text-tertiary, #8A8F98); }
       .ft-send-menu-item { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 1.4; color: var(--dsw-alias-text-primary, #1F2329); cursor: pointer; }
       .ft-send-menu-item:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
-      .ft-send-note { position: absolute; right: 0; bottom: 32px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; max-width: 320px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; color: var(--dsw-alias-text-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.14); }
+      .ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; color: var(--dsw-alias-text-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.14); }
       .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-primary, #3370FF); font-size: 12px; cursor: pointer; }
       .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
       @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
@@ -368,6 +368,8 @@ interface ComposerInputState {
 
 interface ComposerInputActions {
   setDraft(text: string): void
+  /** Present on the shipped composer; used to submit the instruction for us. */
+  submit?(): void
 }
 
 interface SendToGroupProps {
@@ -384,12 +386,11 @@ interface SendToGroupProps {
  * composer slot rather than the right sidebar.
  */
 
-/** Paper-plane glyph: matches the mute weight of the composer's own icons. */
+/** Solid paper plane: the composer row is all filled glyphs at this size. */
 function SendPlaneIcon(): ReactNS.ReactElement {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M13.6 2.4 7.1 8.9" />
-      <path d="M13.6 2.4 9.9 13.6 7.1 8.9 2.4 6.1 13.6 2.4Z" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M14.32 2.05a.6.6 0 0 1 .78.77l-3.6 11.1a.7.7 0 0 1-1.25.17L7.6 9.75 3.9 7.72a.7.7 0 0 1 .05-1.23l10.37-4.44Zm-5.9 7.1 1.86 3.24 2.4-7.4-4.26 4.16Z" />
     </svg>
   )
 }
@@ -466,6 +467,22 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     if (busy || blocked !== '' || targets === null) return
     setBusy(true)
     setNote(null)
+    // The composer text is an instruction for the model; the model writes the
+    // group message and posts it with feishu_send_to_chat. Posting the raw
+    // draft would send the user's notes verbatim, which is not what "让他们确认
+    // 一下" means.
+    if (typeof inputActions.submit === 'function') {
+      const previous = draft
+      inputActions.setDraft(`请把下面这段内容发送到飞书群「${target.label}」：\n\n${previous}`)
+      window.setTimeout(() => {
+        inputActions.submit?.()
+        setBusy(false)
+        setOpen(false)
+        setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
+      }, 30)
+      return
+    }
+    // Older composer without submit: post directly so the control still works.
     try {
       const response = await fetch(FEISHU_API, {
         method: 'POST',
@@ -481,7 +498,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
       const payload = await response.json() as { ok?: boolean; error?: string }
       if (payload.ok !== true) throw new Error(payload.error ?? `HTTP ${response.status}`)
       const previous = draft
-      if (typeof inputActions?.setDraft === 'function') inputActions.setDraft('')
+      inputActions.setDraft('')
       setOpen(false)
       setNote({ text: t('sendToGroupDone', { name: target.label }), previous })
     } catch (error) {

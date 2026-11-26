@@ -2403,6 +2403,31 @@ export class BotHost {
   async bindToSession(chatId: string, sessionId: string, botId?: string, threadId = ''): Promise<void> {
     await this.pick(botId).bindToSession(chatId, sessionId, threadId)
   }
+  /** Resolve a name or id among the conversations this Session owns. */
+  async resolveOwnedConversation(sessionId: string, query: string): Promise<{ chatId: string; threadId: string }> {
+    const owned = this.bots.flatMap(bot => bot.registry.entries()
+      .filter(([, record]) => record.sessionId === sessionId)
+      .map(([, record]) => ({ chatId: record.chatId, threadId: record.threadId ?? '', bot })))
+    if (owned.length === 0) throw new Error('this Session owns no Feishu conversation yet')
+    const pick = (entry: { chatId: string; threadId: string }): { chatId: string; threadId: string } =>
+      ({ chatId: entry.chatId, threadId: entry.threadId })
+    const exact = owned.find(entry => entry.chatId === query || (entry.threadId !== '' && entry.threadId === query))
+    if (exact !== undefined) return pick(exact)
+    if (query === '') {
+      if (owned.length === 1) return pick(owned[0]!)
+      throw new Error(`which conversation? ${owned.map(entry => entry.chatId).join(', ')}`)
+    }
+    // Names come from the chat directory, so compare after resolving them.
+    const names = await Promise.all(owned.map(async entry => ({
+      entry,
+      name: (await entry.bot.chatName(entry.chatId).catch(() => undefined)) ?? '',
+    })))
+    const byName = names.find(row => row.name !== '' && row.name === query)
+      ?? names.find(row => row.name !== '' && row.name.includes(query))
+    if (byName !== undefined) return pick(byName.entry)
+    throw new Error(`no owned conversation matches "${query}"`)
+  }
+
   /**
    * Post one message from a Session into a conversation it already owns.
    *
@@ -2500,6 +2525,7 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
   sharedRegistry.onChange = () => host.notifyBindings()
   ctx.effect(() => () => { void host.dispose() }, 'habo-assistant: lifecycle')
   registerBindTool(ctx, host)
+  registerSendTool(ctx, host)
   registerBindingInfoTool(ctx, host)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
@@ -2519,6 +2545,68 @@ export async function apply(ctx: HostContext, config: unknown): Promise<void> {
 }
 
 /** Let the current Session hand a group to itself, or to a fork of itself. */
+/**
+ * Let the agent post into a Feishu conversation this Session owns.
+ *
+ * The user asks in natural language and the model composes the actual group
+ * message, which is why this is a tool rather than a client-side forward.
+ */
+function registerSendTool(ctx: HostContext, bot: BotHost): void {
+  ctx.effect(() => ctx.tools.register({
+    name: 'feishu_send_to_chat',
+    description: 'Post a message into a Feishu group or topic that this Session already owns. Use it when the user asks you to say something to that group, or to ask the people there a question. The chat can be given by name (as shown in the conversation info panel) or by id.',
+    parameters: {
+      chat: {
+        type: 'string',
+        required: true,
+        description: 'Group name, chat id (oc_...), or topic id (omt_...) of a conversation bound to this Session.',
+      },
+      text: {
+        type: 'string',
+        required: true,
+        description: 'The message body to post. Write it as the final wording; do not include tool receipts or message ids.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          threadId: { type: 'string' },
+          chatName: { type: 'string' },
+          messageId: { type: 'string' },
+        },
+        required: ['chatId', 'threadId'],
+      },
+      render: (_args: unknown, value: { chatId: string; threadId: string; chatName?: string }) => [{
+        type: 'text',
+        text: `Posted to ${value.chatName ?? value.chatId}${value.threadId === '' ? '' : ` (topic ${value.threadId})`}.`,
+      }],
+    },
+    presentCall: (args: { chat?: string; text?: string }) => ({
+      card: 'generic',
+      title: 'Send to Feishu group',
+      kind: 'other',
+      rawInput: args,
+    }),
+    async execute(args: { chat?: unknown; text?: unknown }, exec: { agent?: { session?: { id?: string } } }) {
+      const sessionId = exec.agent?.session?.id
+      if (typeof sessionId !== 'string' || sessionId === '') throw new Error('feishu_send_to_chat requires an owning Session')
+      const text = typeof args.text === 'string' ? args.text.trim() : ''
+      if (text === '') throw new Error('text is required')
+      const target = await bot.resolveOwnedConversation(sessionId, typeof args.chat === 'string' ? args.chat.trim() : '')
+      const sent = await bot.sendToChat({ sessionId, chatId: target.chatId, threadId: target.threadId, text })
+      return {
+        chatId: target.chatId,
+        threadId: target.threadId,
+        ...(sent.chatName === undefined ? {} : { chatName: sent.chatName }),
+        ...(sent.messageId === undefined ? {} : { messageId: sent.messageId }),
+      }
+    },
+  }), 'feishu-bot: send tool')
+}
+
 function registerBindTool(ctx: HostContext, bot: BotHost): void {
   ctx.effect(() => ctx.tools.register({
     name: 'feishu_bind_chat',
