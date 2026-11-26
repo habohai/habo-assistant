@@ -418,6 +418,8 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
 
   if (targets === null || targets.length === 0) return null
 
+  if (inputActions === undefined || typeof inputActions.setDraft !== 'function') return null
+
   const blocked = draft.trim() === ''
     ? t('sendToGroupEmpty')
     : attachments > 0 ? t('sendToGroupAttachments') : ''
