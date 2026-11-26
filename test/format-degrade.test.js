@@ -158,5 +158,11 @@ test('message rows are reduced to readable text', () => {
   assert.equal(messageText({ msg_type: 'post', content: '{"content":[[{"tag":"text","text":"一行"}],[{"tag":"text","text":"二行"}]]}' }), '一行二行')
   assert.equal(messageText({ msg_type: 'image', content: '{"image_key":"img"}' }), '[图片]')
   assert.equal(messageText({ msg_type: 'system', content: '{}' }), '')
-  assert.equal(messageText({ msg_type: 'text', content: 'not json' }), '')
+  assert.equal(messageText({ msg_type: 'text', content: 'not json' }), 'not json')
+})
+
+test('plain-text content rows are kept, not dropped', () => {
+  // lark-cli returns raw text for some text rows, JSON for others.
+  assert.equal(messageText({ msg_type: 'text', content: '测试' }), '测试')
+  assert.equal(messageText({ msg_type: 'text', content: '@_user_1 你好' }), '你好')
 })

@@ -124,7 +124,9 @@ export function messageText(message: Record<string, unknown>): string {
       .replace(/@_user_\d+/g, '')
       .trim()
   } catch {
-    return ''
+    // Plain-text rows arrive as the raw string, not JSON; using it beats dropping
+    // the message entirely.
+    return raw.replace(/@_user_\d+/g, '').trim()
   }
 }
 
