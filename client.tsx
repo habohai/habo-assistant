@@ -390,7 +390,7 @@ const COMPOSER_CSS = `
 .ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
 .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-button:disabled { opacity: .38; cursor: default; }
-.ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 320px; max-width: min(380px, 84vw); max-height: 300px; overflow: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 36px rgba(15,23,42,.16); }
+.ft-send-menu { position: fixed; z-index: 60; width: 340px; max-width: min(380px, 84vw); max-height: min(420px, 60vh); overflow: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 12px 36px rgba(15,23,42,.16); }
 .ft-send-menu-head { padding: 4px 8px 8px; }
 .ft-send-menu-title { font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
 /* Row: the name owns the full width; actions float above it on hover, so a long
@@ -482,6 +482,9 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
 
   const [note, setNote] = React.useState<{ text: string; previous?: string } | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null)
+  /** Fixed-position anchor: the composer clips absolutely positioned children. */
+  const [anchor, setAnchor] = React.useState<{ left: number; bottom: number; width: number } | null>(null)
   const draftRef = React.useRef(draft)
 
   // A popover that survives a click elsewhere reads as a stuck panel: close it on
@@ -508,6 +511,28 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     if (open && draft !== draftRef.current) setOpen(false)
     draftRef.current = draft
   }, [draft, open])
+
+  React.useEffect(() => {
+    if (!open) return
+    const place = (): void => {
+      const button = buttonRef.current
+      if (button === null) return
+      const rect = button.getBoundingClientRect()
+      const width = Math.min(340, window.innerWidth - 24)
+      setAnchor({
+        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+        bottom: window.innerHeight - rect.top + 8,
+        width,
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
 
   React.useEffect(() => {
     console.info('[feishu-bot] composer props', Object.keys(props), 'sessionId=', sessionId,
@@ -640,11 +665,17 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
           if (blocked !== '') { setNote({ text: blocked }); return }
           setOpen(current => !current)
         }}
+        ref={buttonRef}
       >
         {busy ? SendSpinner() : SendPlaneIcon()}
       </button>
       {open ? (
-        <div className="ft-send-menu" role="menu" aria-label={t('sendToGroupPick')}>
+        <div
+          className="ft-send-menu"
+          role="menu"
+          aria-label={t('sendToGroupPick')}
+          style={anchor === null ? undefined : { position: 'fixed', left: anchor.left, bottom: anchor.bottom, width: anchor.width }}
+        >
           <div className="ft-send-menu-head">
             <span className="ft-send-menu-title">{t('sendToGroupPick')}</span>
           </div>
