@@ -398,6 +398,11 @@ const COMPOSER_CSS = `
 .ft-send-menu-row { position: relative; display: flex; align-items: center; border-radius: 8px; }
 .ft-send-menu-row:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
 .ft-send-menu-row:focus-within { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
+.ft-send-name { display: block; overflow: hidden; white-space: nowrap; }
+.ft-send-name-inner { display: inline-block; white-space: nowrap; will-change: transform; }
+.ft-send-name.scrollable:hover .ft-send-name-inner { animation-name: ft-send-marquee; animation-timing-function: linear; animation-iteration-count: infinite; animation-direction: alternate; }
+@keyframes ft-send-marquee { from { transform: translateX(0); } to { transform: translateX(calc(-1 * var(--ft-scroll, 0px))); } }
+@media (prefers-reduced-motion: reduce) { .ft-send-name.scrollable:hover .ft-send-name-inner { animation: none; } }
 .ft-send-menu-item { flex: 1 1 auto; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; line-height: 34px; color: var(--dsw-alias-label-primary, #1F2329); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-send-menu-item:hover { background: transparent; }
 .ft-send-row-actions { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 4px; padding-left: 18px; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
@@ -410,6 +415,41 @@ const COMPOSER_CSS = `
 .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
 @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 `
+
+/**
+ * Group name that reveals its tail on hover.
+ *
+ * The row's action chips float over the right edge, so a name longer than the
+ * row would stay hidden; scrolling it horizontally is the only way to keep both
+ * the actions and the full text reachable.
+ */
+function ScrollName(props: { label: string }): ReactNS.ReactElement {
+  const innerRef = React.useRef<HTMLSpanElement | null>(null)
+  const [shift, setShift] = React.useState(0)
+
+  const measure = (): void => {
+    const node = innerRef.current
+    if (node === null) return
+    const hidden = node.scrollWidth - node.clientWidth
+    setShift(hidden > 4 ? hidden : 0)
+  }
+
+  return (
+    <span
+      className={`ft-send-name${shift > 0 ? ' scrollable' : ''}`}
+      onMouseEnter={measure}
+      title={props.label}
+    >
+      <span
+        ref={innerRef}
+        className="ft-send-name-inner"
+        style={shift > 0 ? { ['--ft-scroll' as string]: `${shift}px`, animationDuration: `${Math.max(2.4, shift / 36)}s` } : undefined}
+      >
+        {props.label}
+      </span>
+    </span>
+  )
+}
 
 /** Chat bubble: the composer row is outline glyphs, so this matches the neighbours. */
 function SendPlaneIcon(): ReactNS.ReactElement {
@@ -618,7 +658,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
                 disabled={busy}
                 onClick={() => { void send(target, 'last') }}
               >
-                {target.label}
+                <ScrollName label={target.label} />
               </button>
               <span className="ft-send-row-actions">
                 <button
