@@ -101,6 +101,7 @@ const zh: Record<string, string> = {
   sendToGroupFailed: '发送失败：{error}',
   sendToGroupTopic: '{name} · 话题',
   sendToGroupRead: '读',
+  sendToGroupSend: '发',
   sendToGroupRowSend: '把上一条回答发到这个群',
   sendToGroupRowRead: '读这个群最近的消息',
   sendToGroupReadDone: '已开始读 {name}',
@@ -389,7 +390,7 @@ const COMPOSER_CSS = `
 .ft-send-button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #8A8F98); cursor: pointer; transition: background .12s ease, color .12s ease; }
 .ft-send-button:hover:not(:disabled), .ft-send-button.open { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.06)); color: var(--dsw-alias-state-business-primary, #3370FF); }
 .ft-send-button:disabled { opacity: .38; cursor: default; }
-.ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 220px; max-height: 280px; overflow: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 10px 30px rgba(15,23,42,.14); }
+.ft-send-menu { position: absolute; right: 0; bottom: 34px; z-index: 40; width: 300px; max-width: min(360px, 82vw); max-height: 280px; overflow: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); background: var(--dsw-alias-bg-elevated, #fff); box-shadow: 0 10px 30px rgba(15,23,42,.14); }
 .ft-send-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 8px 10px; }
 .ft-send-menu-title { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8A8F98); }
 .ft-send-source { height: 22px; padding: 0 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.1)); border-radius: 6px; background: transparent; font-size: 11px; color: var(--dsw-alias-label-secondary, #6B7280); cursor: pointer; outline: none; }
@@ -399,36 +400,16 @@ const COMPOSER_CSS = `
 .ft-send-menu-row:hover { background: var(--dsw-alias-bg-secondary, rgba(0,0,0,.05)); }
 .ft-send-menu-row .ft-send-menu-item { flex: 1 1 auto; min-width: 0; }
 .ft-send-menu-item:hover { background: transparent; }
-.ft-send-row-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; padding-right: 4px; opacity: 0; transition: opacity .12s ease; }
+.ft-send-row-actions { flex: none; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; opacity: 0; transition: opacity .12s ease; }
 .ft-send-menu-row:hover .ft-send-row-actions, .ft-send-menu-row:focus-within .ft-send-row-actions { opacity: 1; }
-.ft-send-row-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary, #8A8F98); cursor: pointer; }
-.ft-send-row-icon:hover { background: var(--dsw-alias-bg-elevated, #fff); color: var(--dsw-alias-state-business-primary, #3370FF); }
+.ft-send-row-icon { display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.1)); border-radius: 6px; background: transparent; font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary, #6B7280); cursor: pointer; }
+.ft-send-row-icon:hover { border-color: var(--dsw-alias-state-business-primary, #3370FF); color: var(--dsw-alias-state-business-primary, #3370FF); }
+.ft-send-row-icon.read:hover { border-color: var(--dsw-alias-state-success-primary, #16A34A); color: var(--dsw-alias-state-success-primary, #16A34A); }
 .ft-send-note { position: absolute; right: 0; bottom: 34px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 340px; white-space: nowrap; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-primary, #1F2329); background: var(--dsw-alias-bg-elevated, #fff); border: 1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.08)); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
 .ft-send-undo { border: 0; background: transparent; padding: 0; color: var(--dsw-alias-state-business-primary, #3370FF); font-size: 12px; cursor: pointer; }
 .ft-send-spin { animation: ft-send-rotate .9s linear infinite; transform-origin: 50% 50%; }
 @keyframes ft-send-rotate { to { transform: rotate(360deg); } }
 `
-
-/** Outbound arrow for one row's send action. */
-function SendArrowIcon(): ReactNS.ReactElement {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10 3h3v3" />
-      <path d="M13 3 7.5 8.5" />
-      <path d="M12.5 9.5v2.7a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V4.3a.8.8 0 0 1 .8-.8h2.8" />
-    </svg>
-  )
-}
-
-/** Open-book glyph for one row's read action. */
-function ReadBookIcon(): ReactNS.ReactElement {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2.5 3.6h3.2c.7 0 1.3.6 1.3 1.3v7.5c0-.6-.5-1.1-1.1-1.1H2.5V3.6Z" />
-      <path d="M13.5 3.6H10.3c-.7 0-1.3.6-1.3 1.3v7.5c0-.6.5-1.1 1.1-1.1h3.4V3.6Z" />
-    </svg>
-  )
-}
 
 /** Chat bubble: the composer row is outline glyphs, so this matches the neighbours. */
 function SendPlaneIcon(): ReactNS.ReactElement {
@@ -643,7 +624,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
                 type="button"
                 role="menuitem"
                 className="ft-send-menu-item"
-                title={t('sendToGroupRowSend')}
+                title={target.label}
                 disabled={busy}
                 onClick={() => { void send(target) }}
               >
@@ -652,23 +633,21 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
               <span className="ft-send-row-actions">
                 <button
                   type="button"
-                  className="ft-send-row-icon"
+                  className="ft-send-row-icon send"
                   title={t('sendToGroupRowSend')}
-                  aria-label={t('sendToGroupRowSend')}
                   disabled={busy}
                   onClick={() => { void send(target) }}
                 >
-                  <SendArrowIcon />
+                  {t('sendToGroupSend')}
                 </button>
                 <button
                   type="button"
-                  className="ft-send-row-icon"
+                  className="ft-send-row-icon read"
                   title={t('sendToGroupRowRead')}
-                  aria-label={t('sendToGroupRowRead')}
                   disabled={busy}
                   onClick={() => { void read(target) }}
                 >
-                  <ReadBookIcon />
+                  {t('sendToGroupRead')}
                 </button>
               </span>
             </div>
