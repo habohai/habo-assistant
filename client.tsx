@@ -550,6 +550,38 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     }
   }, [open, measureAnchor])
 
+  // Load the bound conversations once per session; the menu is only useful when
+  // this Session actually owns a group.
+  React.useEffect(() => {
+    let alive = true
+    setTargets(null)
+    void fetch(`${FEISHU_API}?action=bindings`)
+      .then(response => response.json())
+      .then((payload: { value?: { bindings?: Array<Record<string, unknown>> } }) => {
+        if (!alive) return
+        const rows = (payload.value?.bindings ?? [])
+          .filter(row => row.sessionId === sessionId)
+          .map(row => {
+            const chatId = String(row.chatId ?? '')
+            const threadId = String(row.threadId ?? '')
+            const name = String(row.chatName ?? '') || chatId
+            return {
+              key: `${chatId}::${threadId}`,
+              chatId,
+              threadId,
+              label: threadId === '' ? name : t('sendToGroupTopic', { name }),
+            }
+          })
+        console.info('[feishu-bot] composer targets', rows.length, 'sessionId=', sessionId)
+        setTargets(rows)
+      })
+      .catch(error => {
+        console.info('[feishu-bot] composer targets failed', String(error))
+        if (alive) setTargets([])
+      })
+    return () => { alive = false }
+  }, [sessionId])
+
   React.useEffect(() => {
     if (note === null) return
     const timer = setTimeout(() => setNote(current => (current === note ? null : current)), 6000)
