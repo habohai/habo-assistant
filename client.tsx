@@ -45,6 +45,7 @@ type TFunction = (key: string, params?: Record<string, string | number>) => stri
 
 /** Assigned by the module factory before any component renders. */
 let React!: typeof ReactNS
+let createPortal: ((node: ReactNS.ReactNode, target: Element) => ReactNS.ReactElement) | undefined
 let h!: (...args: any[]) => ReactNS.ReactElement
 
 interface ClientContext {
@@ -451,6 +452,14 @@ function ScrollName(props: { label: string }): ReactNS.ReactElement {
   )
 }
 
+/** Portal the overlay to the body so the composer's clipping cannot cut it. */
+function renderOverlay(node: ReactNS.ReactNode): ReactNS.ReactElement {
+  if (createPortal !== undefined && typeof document !== 'undefined') {
+    return createPortal(node, document.body)
+  }
+  return node as ReactNS.ReactElement
+}
+
 /** Chat bubble: the composer row is outline glyphs, so this matches the neighbours. */
 function SendPlaneIcon(): ReactNS.ReactElement {
   return (
@@ -512,61 +521,36 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     draftRef.current = draft
   }, [draft, open])
 
-  React.useEffect(() => {
-    if (!open) return
-    const place = (): void => {
-      const button = buttonRef.current
-      if (button === null) return
-      const rect = button.getBoundingClientRect()
-      const width = Math.min(340, window.innerWidth - 24)
-      setAnchor({
-        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
-        bottom: window.innerHeight - rect.top + 8,
-        width,
-      })
-    }
-    place()
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [open])
-
-  React.useEffect(() => {
-    console.info('[feishu-bot] composer props', Object.keys(props), 'sessionId=', sessionId,
-      'actions=', typeof inputActions?.setDraft, 'useInput=', typeof useInput)
+  // The composer clips positioned children, so the menu lives in a fixed layer
+  // anchored to the button and clamped inside the viewport.
+  const measureAnchor = React.useCallback((): void => {
+    const button = buttonRef.current
+    if (button === null) return
+    const rect = button.getBoundingClientRect()
+    const width = Math.min(340, window.innerWidth - 24)
+    setAnchor({
+      left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
+      bottom: Math.max(12, window.innerHeight - rect.top + 8),
+      width,
+    })
   }, [])
 
   React.useEffect(() => {
-    let alive = true
-    void fetch(`${FEISHU_API}?action=bindings`)
-      .then(response => response.json())
-      .then((payload: { value?: { bindings?: Array<Record<string, unknown>> } }) => {
-        if (!alive) return
-        const rows = (payload.value?.bindings ?? [])
-          .filter(row => row.sessionId === sessionId)
-          .map(row => {
-            const chatId = String(row.chatId ?? '')
-            const threadId = String(row.threadId ?? '')
-            const name = String(row.chatName ?? '') || chatId
-            return {
-              key: `${chatId}::${threadId}`,
-              chatId,
-              threadId,
-              label: threadId === '' ? name : t('sendToGroupTopic', { name }),
-            }
-          })
-        console.info('[feishu-bot] composer targets', rows.length, 'sessionId=', sessionId)
-        setTargets(rows)
-      })
-      .catch(error => {
-        console.info('[feishu-bot] composer targets failed', String(error))
-        if (alive) setTargets([])
-      })
-    return () => { alive = false }
-  }, [sessionId])
+    if (!open) return
+    measureAnchor()
+    window.addEventListener('resize', measureAnchor)
+    window.addEventListener('scroll', measureAnchor, true)
+    return () => {
+      window.removeEventListener('resize', measureAnchor)
+      window.removeEventListener('scroll', measureAnchor, true)
+    }
+  }, [open, measureAnchor])
+
+  React.useEffect(() => {
+    if (note === null) return
+    const timer = setTimeout(() => setNote(current => (current === note ? null : current)), 6000)
+    return () => clearTimeout(timer)
+  }, [note])
 
   const ready = targets !== null && targets.length > 0
   const blocked = targets === null
@@ -574,12 +558,6 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
     : targets.length === 0
       ? t('sendToGroupNone')
       : attachments > 0 ? t('sendToGroupAttachments') : ''
-
-  React.useEffect(() => {
-    if (note === null) return
-    const timer = setTimeout(() => setNote(current => (current === note ? null : current)), 6000)
-    return () => clearTimeout(timer)
-  }, [note])
 
   async function read(target: SendTarget): Promise<void> {
     if (busy || targets === null) return
@@ -663,13 +641,14 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
         onMouseDown={(event: ReactNS.MouseEvent) => event.preventDefault()}
         onClick={() => {
           if (blocked !== '') { setNote({ text: blocked }); return }
+          if (!open) measureAnchor()
           setOpen(current => !current)
         }}
         ref={buttonRef}
       >
         {busy ? SendSpinner() : SendPlaneIcon()}
       </button>
-      {open ? (
+      {open ? renderOverlay(
         <div
           className="ft-send-menu"
           role="menu"
@@ -724,7 +703,7 @@ function SendToGroup(props: SendToGroupProps): ReactNS.ReactElement | null {
               </span>
             </div>
           ))}
-        </div>
+        </div>,
       ) : null}
       {note === null ? null : (
         <div className="ft-send-note" role="status">
@@ -762,6 +741,12 @@ function TasksTitle({ useTabInfo }: { useTabInfo: () => TabInfoValue }): ReactNS
   id: 'habo-assistant',
   factory(require) {
     React = require('react') as typeof ReactNS
+    try {
+      const dom = require('react-dom') as { createPortal?: typeof createPortal }
+      createPortal = dom.createPortal
+    } catch {
+      createPortal = undefined
+    }
     h = React.createElement as (...args: any[]) => ReactNS.ReactElement
 
     function applyTasks(ctx: ClientContext): void {
