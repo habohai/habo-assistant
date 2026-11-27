@@ -851,3 +851,26 @@ test('sendToChat posts when the session owns the conversation', async () => {
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a table answer is delivered as a card, not as an edit', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    const answer = ['结论如下：', '', '| 节点 | 应显存 |', '| --- | --- |', '| 10.3.208.12 | 83% |'].join('\n')
+    const ok = await bot.deliver(
+      { chatId: 'oc_1', messageId: 'om_q1', senderId: 'ou_1', text: '', threadId: '', eventType: 'message' },
+      'om_placeholder',
+      [answer],
+    )
+    assert.equal(ok, true)
+    const cardReply = spawned.find(request => request.argv.includes('--msg-type')
+      && request.argv.includes('interactive')
+      && request.argv.includes('+messages-reply'))
+    assert.ok(cardReply, 'the answer must go out as an interactive card')
+    const edit = spawned.find(request => request.argv.includes('+messages-edit'))
+    assert.equal(edit, undefined, 'a post placeholder must not be edited with a table')
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

@@ -643,6 +643,9 @@ export class LarkCli {
     // lark-cli >= 1.0.100 can edit into a rich-text message, so the placeholder
     // must use the same transport decision as a fresh reply; plain `--text`
     // would leave Markdown markers visible.
+    // A message cannot be edited into a card, so a table is flattened here: the
+    // caller (deliver) is responsible for routing table answers to a card reply.
+    text = flattenTables(text)
     const plan = decideReply(text)
     const body = plan.kind === 'post' ? sanitizeForPost(normalizeMentions(text, 'post')) : normalizeMentions(text, 'text')
     if (this.dryRun) {
