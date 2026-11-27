@@ -134,7 +134,7 @@ export interface Config {
 export const DEFAULTS = {
   timeoutMs: 10 * 60 * 1000,
   maxReplyChars: 3500,
-  replyGuidelines: '使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。',
+  replyGuidelines: '使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。表格控制在 5 列以内、单元格不超过 20 字，否则改用列表。',
   maxConcurrent: 4,
   maxQueue: 20,
   cliTimeoutMs: 15_000,
@@ -211,7 +211,7 @@ export function normalizeConfig(raw: unknown): Config {
       : integer('requestTrustMs', 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
     timeoutMs: integer('timeoutMs', DEFAULTS.timeoutMs, 5_000, 60 * 60 * 1000),
     maxReplyChars: integer('maxReplyChars', DEFAULTS.maxReplyChars, 200, 50_000),
-    replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 500),
+    replyGuidelines: string('replyGuidelines', DEFAULTS.replyGuidelines).slice(0, 600),
     maxConcurrent: integer('maxConcurrent', DEFAULTS.maxConcurrent, 1, 32),
     maxQueue: integer('maxQueue', DEFAULTS.maxQueue, 1, 500),
     cliTimeoutMs: integer('cliTimeoutMs', DEFAULTS.cliTimeoutMs, 1_000, 120_000),

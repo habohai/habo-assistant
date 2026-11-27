@@ -14,6 +14,7 @@
 
 import { decideReply } from './format/decide.js'
 import { flattenTables, normalizeMentions, sanitizeForPost } from './format/sanitize.js'
+import { hasTable } from './format/table.js'
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 256 * 1024
@@ -598,6 +599,14 @@ export class LarkCli {
       this.logger?.info(`feishu-bot[dry-run]: reply ${plan.kind} to ${messageId}: ${body}`)
       return undefined
     }
+    this.logger?.info(JSON.stringify({
+      event: 'feishu.outbound',
+      transport: 'reply',
+      kind: plan.kind,
+      hasTable: hasTable(text),
+      chars: text.length,
+      messageId,
+    }))
     const args = (kind: 'text' | 'post'): string[] => [
       'im', '+messages-reply',
       '--message-id', messageId,
@@ -640,6 +649,14 @@ export class LarkCli {
       this.logger?.info(`feishu-bot[dry-run]: edit ${messageId} as ${plan.kind}: ${body}`)
       return true
     }
+    this.logger?.info(JSON.stringify({
+      event: 'feishu.outbound',
+      transport: 'edit',
+      kind: plan.kind,
+      hasTable: hasTable(text),
+      chars: text.length,
+      messageId,
+    }))
     await this.run([
       'im', '+messages-edit',
       '--message-id', messageId,
@@ -675,6 +692,14 @@ export class LarkCli {
       this.logger?.info(`feishu-bot[dry-run]: send ${plan.kind} to ${chatId}: ${body}`)
       return undefined
     }
+    this.logger?.info(JSON.stringify({
+      event: 'feishu.outbound',
+      transport: 'send',
+      kind: plan.kind,
+      hasTable: hasTable(text),
+      chars: text.length,
+      chatId,
+    }))
     const args = (kind: 'text' | 'post'): string[] => [
       'im', '+messages-send',
       '--chat-id', chatId,
@@ -714,24 +739,6 @@ export class LarkCli {
    * Used for approvals, where buttons replace the "reply 同意/拒绝" round trip.
    * A caller that cannot render a card keeps the text prompt as its fallback.
    */
-  /** Reply with an interactive card (used when the reply carries a table). */
-  async replyCard(messageId: string, card: unknown, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
-    if (this.dryRun) {
-      this.logger?.info(`feishu-bot[dry-run]: card reply to ${messageId}`)
-      return undefined
-    }
-    const { stdout } = await this.run([
-      'im', '+messages-reply',
-      '--message-id', messageId,
-      '--msg-type', 'interactive',
-      '--content', JSON.stringify(card),
-      '--as', 'bot',
-      '--idempotency-key', idempotencyKey('feishu-card-reply', messageId, keySuffix),
-      ...(inThread === true ? ['--reply-in-thread'] : []),
-    ])
-    return parseMessageId(stdout)
-  }
-
   async sendCard(chatId: string, card: unknown, keySuffix = '0'): Promise<string | undefined> {
     if (this.dryRun) {
       this.logger?.info(`feishu-bot[dry-run]: send card to ${chatId}`)

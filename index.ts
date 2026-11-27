@@ -34,6 +34,7 @@ import { describeToolCall, isMutatingTool } from './src/action.js'
 import { DEFAULT_DENY_PATTERNS, compileDenyPatterns, isDangerousCommand } from './src/approval.js'
 import { decideReply } from './src/format/decide.js'
 import { hasTable } from './src/format/table.js'
+import { chooseTransport } from './src/format/decide.js'
 import { approvalCard, approvalResultCard, readCardAction } from './src/format/card.js'
 import { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
 import { BindingRegistry, BotBindings } from './src/binding-registry.js'
@@ -63,7 +64,7 @@ export { DEFAULT_DENY_PATTERNS, approvalDecision, compileDenyPatterns, isDangero
 export { BindingRegistry } from './src/binding-registry.js'
 export { ChatDirectory } from './src/chat-directory.js'
 export { MUTATING_TOOLS, READ_ONLY_TOOLS, describeToolCall, isMutatingTool } from './src/action.js'
-export { decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
+export { chooseTransport, decideReply, hasMarkdownTable, markdownMarkers } from './src/format/decide.js'
 export { hasTable } from './src/format/table.js'
 export { flattenTables, normalizeMentions, sanitizeForPost } from './src/format/sanitize.js'
 export { ACK_FALLBACK, ACK_POOL, pickAckReaction } from './src/format/reaction.js'
@@ -1703,16 +1704,18 @@ export class FeishuBot {
     let index = 0
     // Only ever edit/recall a message that is not the question itself.
     const target = placeholder === event.messageId ? undefined : placeholder
-    // A card is the only transport that renders a table, and a post message cannot
-    // be edited into a card: such an answer must be a fresh card reply.
-    const tableAnswer = chunks.length > 0 && hasTable(chunks[0] ?? '')
+    // The transport decision lives in one place so every outbound path agrees.
+    const transport = chooseTransport({
+      hasTable: chunks.length > 0 && hasTable(chunks[0] ?? ''),
+      hasPlaceholder: target !== undefined && chunks.length > 0,
+    })
     try {
-      if (tableAnswer && target !== undefined) {
+      if (transport === 'reply' && target !== undefined && chunks.length > 0) {
         await this.cli.withdraw(target).catch(error => {
           this.ctx.logger.debug(`feishu-bot: cannot withdraw placeholder: ${String(error)}`)
         })
       }
-      if (target !== undefined && chunks.length > 0 && !tableAnswer) {
+      if (transport === 'edit' && target !== undefined && chunks.length > 0) {
         try {
           await this.cli.edit(target, chunks[0])
           index = 1

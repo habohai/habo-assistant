@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { decideReply, hasMarkdownTable, hasTable, markdownMarkers } from '../lib/index.js'
+import { chooseTransport, decideReply, hasMarkdownTable, hasTable, markdownMarkers } from '../lib/index.js'
 
 test('decideReply keeps plain text on the text transport', () => {
   const plan = decideReply('构建成功了。')
@@ -79,4 +79,17 @@ test('a header with no body row is not a table', () => {
 
 test('prose without pipes is not a table', () => {
   assert.equal(hasTable('普通回复\n\n- 列表'), false)
+})
+
+test('a table answer never reuses the placeholder', () => {
+  assert.equal(chooseTransport({ hasTable: true, hasPlaceholder: true }), 'reply')
+})
+
+test('a plain answer edits the placeholder when one exists', () => {
+  assert.equal(chooseTransport({ hasTable: false, hasPlaceholder: true }), 'edit')
+})
+
+test('no placeholder means a fresh reply', () => {
+  assert.equal(chooseTransport({ hasTable: false, hasPlaceholder: false }), 'reply')
+  assert.equal(chooseTransport({ hasTable: true, hasPlaceholder: false }), 'reply')
 })

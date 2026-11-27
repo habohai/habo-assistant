@@ -121,7 +121,7 @@ test('an accepted message gets an immediate placeholder that becomes the answer'
     // The answer replaced the placeholder instead of adding another message.
     assert.equal(replies.length, 1)
 
-    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。 | 委派指引:需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:ou_1]\n帮我看下构建为什么失败')
+    assert.equal(prompts[0].content[0].text, '[飞书群:oc_1 | 机器人:飞书机器人 | 机器人ID:飞书机器人 | 群内已绑定机器人:飞书机器人 | 回复要求:使用中文回答。保持简洁、有条理：先给结论，再列必要要点；不要冗长客套，不要重复问题；不要把工具回执（message_id、时间戳、原始命令行输出）写进回答。表格控制在 5 列以内、单元格不超过 20 字，否则改用列表。 | 委派指引:需要多步工具调用、长时间检索或大范围分析时，用 subagent 工具委派；它看不到本群上下文，prompt 要写全任务 | 提问人:ou_1]\n帮我看下构建为什么失败')
     assert.equal(bot.metrics.snapshot().counts.jobsSucceeded, 1)
   } finally {
     await bot.dispose()

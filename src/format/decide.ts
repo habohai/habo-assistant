@@ -87,3 +87,20 @@ export function decideReply(text: string): ReplyPlan {
   if (markers.length === 0 && !table) return { kind: 'text', reason: 'plain', content, markers, table }
   return { kind: 'post', reason: table && markers.length === 0 ? 'table' : 'markdown', content, markers, table }
 }
+
+
+/** Which transport one outbound message may use. */
+export type OutboundTransport = 'edit' | 'reply'
+
+/**
+ * Decide whether an answer may reuse the placeholder message.
+ *
+ * `+messages-edit` re-encodes Markdown and loses table structure (it drops the
+ * divider row and the leading pipes), so an answer containing a table must be a
+ * fresh reply even when a placeholder exists. Keeping this decision in one pure
+ * function stops the three send paths from drifting apart.
+ */
+export function chooseTransport(input: { hasTable: boolean; hasPlaceholder: boolean }): OutboundTransport {
+  if (!input.hasPlaceholder) return 'reply'
+  return input.hasTable ? 'reply' : 'edit'
+}
