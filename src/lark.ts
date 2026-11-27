@@ -14,6 +14,8 @@
 
 import { decideReply } from './format/decide.js'
 import { flattenTables, normalizeMentions, sanitizeForPost } from './format/sanitize.js'
+import { replyCard as buildReplyCard } from './format/card.js'
+import { hasTable, splitTables } from './format/table.js'
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 256 * 1024
@@ -588,8 +590,18 @@ export class LarkCli {
 
   /** Send a reply: post for supported Markdown, plain text otherwise. */
   async replyFormatted(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
-    // Feishu has no table block, so a pipe table must become readable lines first.
-    text = flattenTables(text)
+    // A table only renders in an interactive card; post would lose the body rows.
+    if (hasTable(text)) {
+      const card = buildReplyCard(splitTables(text))
+      try {
+        const sent = await this.replyCard(messageId, card, { inThread, keySuffix })
+        if (sent !== undefined) return sent
+      } catch (error) {
+        this.logger?.info(`feishu-bot: card reply failed, falling back to text: ${String(error)}`)
+      }
+      // Card rejected (size or schema): keep the content readable instead of failing.
+      text = flattenTables(text)
+    }
     const plan = decideReply(text)
     // Mentions and control characters must be fixed before the payload is built,
     // or Feishu rejects the post as invalid rich text.
@@ -712,6 +724,24 @@ export class LarkCli {
    * Used for approvals, where buttons replace the "reply 同意/拒绝" round trip.
    * A caller that cannot render a card keeps the text prompt as its fallback.
    */
+  /** Reply with an interactive card (used when the reply carries a table). */
+  async replyCard(messageId: string, card: unknown, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
+    if (this.dryRun) {
+      this.logger?.info(`feishu-bot[dry-run]: card reply to ${messageId}`)
+      return undefined
+    }
+    const { stdout } = await this.run([
+      'im', '+messages-reply',
+      '--message-id', messageId,
+      '--msg-type', 'interactive',
+      '--content', JSON.stringify(card),
+      '--as', 'bot',
+      '--idempotency-key', idempotencyKey('feishu-card-reply', messageId, keySuffix),
+      ...(inThread === true ? ['--reply-in-thread'] : []),
+    ])
+    return parseMessageId(stdout)
+  }
+
   async sendCard(chatId: string, card: unknown, keySuffix = '0'): Promise<string | undefined> {
     if (this.dryRun) {
       this.logger?.info(`feishu-bot[dry-run]: send card to ${chatId}`)
