@@ -14,8 +14,6 @@
 
 import { decideReply } from './format/decide.js'
 import { flattenTables, normalizeMentions, sanitizeForPost } from './format/sanitize.js'
-import { replyCard as buildReplyCard } from './format/card.js'
-import { hasTable, splitTables } from './format/table.js'
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 256 * 1024
@@ -590,18 +588,8 @@ export class LarkCli {
 
   /** Send a reply: post for supported Markdown, plain text otherwise. */
   async replyFormatted(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
-    // A table only renders in an interactive card; post would lose the body rows.
-    if (hasTable(text)) {
-      const card = buildReplyCard(splitTables(text))
-      try {
-        const sent = await this.replyCard(messageId, card, { inThread, keySuffix })
-        if (sent !== undefined) return sent
-      } catch (error) {
-        this.logger?.info(`feishu-bot: card reply failed, falling back to text: ${String(error)}`)
-      }
-      // Card rejected (size or schema): keep the content readable instead of failing.
-      text = flattenTables(text)
-    }
+    // Feishu's post renderer draws Markdown tables correctly; the card table
+    // element truncated cells in narrow cards, so tables stay in post.
     const plan = decideReply(text)
     // Mentions and control characters must be fixed before the payload is built,
     // or Feishu rejects the post as invalid rich text.
@@ -681,7 +669,6 @@ export class LarkCli {
 
   /** Send a fresh message into a chat, choosing post for supported Markdown. */
   async send(chatId: string, text: string, keySuffix = '0'): Promise<string | undefined> {
-    text = flattenTables(text)
     const plan = decideReply(text)
     const body = plan.kind === 'post' ? sanitizeForPost(normalizeMentions(text, 'post')) : normalizeMentions(text, 'text')
     if (this.dryRun) {

@@ -852,7 +852,7 @@ test('sendToChat posts when the session owns the conversation', async () => {
   }
 })
 
-test('a table answer is delivered as a card, not as an edit', async () => {
+test('a table answer skips the placeholder edit and goes out as a fresh reply', async () => {
   const { bot, stateDir, spawned } = await createBot()
   try {
     const answer = ['结论如下：', '', '| 节点 | 应显存 |', '| --- | --- |', '| 10.3.208.12 | 83% |'].join('\n')
@@ -862,15 +862,47 @@ test('a table answer is delivered as a card, not as an edit', async () => {
       [answer],
     )
     assert.equal(ok, true)
-    const cardReply = spawned.find(request => request.argv.includes('--msg-type')
-      && request.argv.includes('interactive')
-      && request.argv.includes('+messages-reply'))
-    assert.ok(cardReply, 'the answer must go out as an interactive card')
+    // `+messages-edit` mangles Markdown tables, so the placeholder is withdrawn
+    // and the answer is sent as its own message.
     const edit = spawned.find(request => request.argv.includes('+messages-edit'))
-    assert.equal(edit, undefined, 'a post placeholder must not be edited with a table')
+    assert.equal(edit, undefined, 'the placeholder must not be edited with a table')
+    const reply = spawned.find(request => request.argv.includes('+messages-reply') && request.argv.includes('--markdown'))
+    assert.ok(reply, 'the answer goes out as a markdown reply')
+    // Withdrawal goes through the delete endpoint, the same call an edit failure uses.
+    assert.equal(findCalls(spawned, 'delete').length, 1, 'the placeholder is withdrawn')
     await new Promise(resolve => setTimeout(resolve, 40))
   } finally {
     await bot.dispose()
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('sendToChat refuses a conversation the session does not own', async () => {
+  const { bot, stateDir } = await createBot()
+  try {
+    const host = new BotHost(bot.ctx, bot.config, [bot])
+    await assert.rejects(
+      () => host.sendToChat({ sessionId: 'ses_other', chatId: 'oc_1', text: '你好' }),
+      /does not own/,
+    )
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('sendToChat posts when the session owns the conversation', async () => {
+  const { bot, stateDir, spawned } = await createBot()
+  try {
+    bot.cli.chatInfo = async chatId => ({ chatId, name: 'Runtime group', botMember: true })
+    await bot.bindChat('oc_1', 'ses_1')
+    const host = new BotHost(bot.ctx, bot.config, [bot])
+    const value = await host.sendToChat({ sessionId: 'ses_1', chatId: 'oc_1', text: '确认一下' })
+    assert.ok(value.messageId !== undefined || spawned.some(r => r.argv.includes('+messages-send')))
+    await new Promise(resolve => setTimeout(resolve, 40))
+  } finally {
+    await bot.dispose()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+

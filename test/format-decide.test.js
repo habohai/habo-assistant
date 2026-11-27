@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { decideReply, hasMarkdownTable, hasTable, markdownMarkers, replyCard, splitTables } from '../lib/index.js'
+import { decideReply, hasMarkdownTable, hasTable, markdownMarkers } from '../lib/index.js'
 
 test('decideReply keeps plain text on the text transport', () => {
   const plan = decideReply('构建成功了。')
@@ -64,50 +64,19 @@ test('decideReply keeps long plain replies on the text transport', () => {
   assert.equal(decideReply(markdown).kind, 'post')
 })
 
-
-test('a reply with a table splits into prose and table segments', () => {
-  const reply = [
-    '核对结果如下：',
-    '',
-    '| 分支 | 提交 |',
-    '| --- | --- |',
-    '| master | ce8e3536 |',
-    '| release-v10.0.2 | e96c9e36 |',
-    '',
-    '结论：可以合。',
-  ].join('\n')
-  const segments = splitTables(reply)
-  assert.equal(segments.length, 3)
-  assert.deepEqual(segments[0], { kind: 'text', text: '核对结果如下：' })
-  assert.deepEqual(segments[1], {
-    kind: 'table',
-    table: { headers: ['分支', '提交'], rows: [['master', 'ce8e3536'], ['release-v10.0.2', 'e96c9e36']] },
-  })
-  assert.deepEqual(segments[2], { kind: 'text', text: '结论：可以合。' })
+test('a reply with a table is detected', () => {
+  const reply = ['核对结果如下：', '', '| 分支 | 提交 |', '| --- | --- |', '| master | ce8e3536 |', '', '结论：可以合。'].join('\n')
   assert.equal(hasTable(reply), true)
 })
 
-test('a pipe block without a divider stays prose', () => {
-  const reply = '| a | b |\n| 1 | 2 |'
-  assert.equal(hasTable(reply), false)
-  assert.deepEqual(splitTables(reply), [{ kind: 'text', text: reply }])
+test('a pipe block without a divider is not a table', () => {
+  assert.equal(hasTable('| a | b |\n| 1 | 2 |'), false)
 })
 
-test('cells lose inline Markdown decoration', () => {
-  const segments = splitTables('| a | b |\n| --- | --- |\n| **粗** | `code` |')
-  assert.deepEqual(segments[0].table.rows[0], ['粗', 'code'])
+test('a header with no body row is not a table', () => {
+  assert.equal(hasTable('| a | b |\n| --- | --- |'), false)
 })
 
-test('ragged rows are padded to the header width', () => {
-  const segments = splitTables('| a | b | c |\n| --- | --- | --- |\n| 1 | 2 |')
-  assert.deepEqual(segments[0].table.rows[0], ['1', '2', ''])
-})
-
-test('the card carries a table element per table', () => {
-  const card = replyCard(splitTables('说明\n\n| a | b |\n| --- | --- |\n| 1 | 2 |'))
-  assert.equal(card.body.elements.length, 2)
-  assert.equal(card.body.elements[0].tag, 'markdown')
-  assert.equal(card.body.elements[1].tag, 'table')
-  assert.equal(card.body.elements[1].columns?.length, 2)
-  assert.equal(card.body.elements[1].rows?.length, 1)
+test('prose without pipes is not a table', () => {
+  assert.equal(hasTable('普通回复\n\n- 列表'), false)
 })
