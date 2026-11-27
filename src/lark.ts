@@ -13,7 +13,7 @@
  */
 
 import { decideReply } from './format/decide.js'
-import { normalizeMentions, sanitizeForPost } from './format/sanitize.js'
+import { flattenTables, normalizeMentions, sanitizeForPost } from './format/sanitize.js'
 import type { Logger, SubprocessLike, SubprocessOutcome } from './types.js'
 
 const OUTPUT_LIMIT_BYTES = 256 * 1024
@@ -588,6 +588,8 @@ export class LarkCli {
 
   /** Send a reply: post for supported Markdown, plain text otherwise. */
   async replyFormatted(messageId: string, text: string, { inThread = false, keySuffix = '0' }: { inThread?: boolean; keySuffix?: string } = {}): Promise<string | undefined> {
+    // Feishu has no table block, so a pipe table must become readable lines first.
+    text = flattenTables(text)
     const plan = decideReply(text)
     // Mentions and control characters must be fixed before the payload is built,
     // or Feishu rejects the post as invalid rich text.
@@ -664,6 +666,7 @@ export class LarkCli {
 
   /** Send a fresh message into a chat, choosing post for supported Markdown. */
   async send(chatId: string, text: string, keySuffix = '0'): Promise<string | undefined> {
+    text = flattenTables(text)
     const plan = decideReply(text)
     const body = plan.kind === 'post' ? sanitizeForPost(normalizeMentions(text, 'post')) : normalizeMentions(text, 'text')
     if (this.dryRun) {
